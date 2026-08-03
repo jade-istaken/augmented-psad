@@ -52,3 +52,4 @@ for img in imgs:
     processed_image = Image.fromarray(mask, 'P')
     processed_image.putpalette(palette)
     processed_image.save(outpath)
+    
