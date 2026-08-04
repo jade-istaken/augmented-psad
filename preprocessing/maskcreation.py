@@ -46,10 +46,9 @@ for img in imgs:
         print(idx_object, label)
 
     mask = np.array(mask)
-    print(mask.shape, np.unique(mask))
+    #print(mask.shape, np.unique(mask))
 
     outpath = os.path.join(target_directory,img)
     processed_image = Image.fromarray(mask, 'P')
     processed_image.putpalette(palette)
     processed_image.save(outpath)
-    
