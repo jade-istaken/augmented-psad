@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -56,3 +57,54 @@ class KCenterGreedy:
 
         selected_embeddings = self.embedding[selected_indices]
         return torch.tensor(selected_embeddings, dtype=torch.float32)
+
+class PatchMemoryBank:
+    def __init__(self,
+                 num_neighbors = 9,
+                 sampling_ratio = 0.1,
+                 target_image_size = (256,256)):
+        self.num_neighbors = num_neighbors
+        self.sampling_ratio = sampling_ratio
+        self.target_image_size = target_image_size
+        self.memory_bank: torch.Tensor | None = None
+        self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
+
+    def build(self, embeddings: torch.Tensor):
+        #builds the memory bank from embeddings
+        if self.sampling_ratio < 1.0:
+            self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
+        else:
+            self.memory_bank = embeddings
+
+        print(f"Patch memory bank built with {self.memory_bank.shape[0]} patches")
+
+    def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float):
+        sampler = KCenterGreedy(embedding=embeddings, sampling_ratio=sampling_ratio)
+        return sampler.sample_coreset()
+
+    def score(self,
+              test_embeddings: torch.Tensor,
+              feature_map_shape: Tuple[int,int]
+              )-> Tuple[torch.T, float]:
+        #computes the path-level anomaly scores and then aggregates them
+        device = test_embeddings.device
+        memory_bank = self.memory_bank.to(device) #just make sure that all the tensors are on the same device
+
+        distances = torch.cdist(test_embeddings, memory_bank, p=2.0)
+        patch_scores, _ = distances.topk(k=self.num_neighbors, largest=False,dim=1) #distance to k nearest neighbors
+        min_distances = patch_scores[:,0] #the distance to the nearest neighbor is the primary patch score
+
+        height,width = feature_map_shape #reshape back to 2d
+        anomaly_map_2d = min_distances.reshape(1,1,height,width)
+
+        anomaly_map_upscaled = functional.interpolate(
+            anomaly_map_2d,
+            size=self.target_image_size,
+            mode="bilinear",
+            align_corners=False
+        )
+        anomaly_map_smoothed = self.blur(anomaly_map_upscaled)
+
+        anomaly_score = torch.max(min_distances).item() / 10.0 #calculate the image-level score by max pooling over spatial dimensions
+
+        return anomaly_map_smoothed.squeeze().cpu(), anomaly_score
