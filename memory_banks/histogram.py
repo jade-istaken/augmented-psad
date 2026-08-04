@@ -40,7 +40,7 @@ class HistogramMemoryBank:
             if min_dist > max_dist:
                 max_dist = min_dist
 
-        self.max_train_distance = min(max_dist, 1e-8) #add a lower bound so that there isn't divide by zero when it comes to scaling
+        self.max_train_distance = max(max_dist, 1e-8) #add a lower bound so that there isn't divide by zero when it comes to scaling
 
     def score(self, test_mask: torch.Tensor) -> Tuple[torch.Tensor, float]:
         counts = torch.bincount(test_mask.flatten(), minlength=self.num_classes).float()
