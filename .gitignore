@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+#idealabs stuff
+.idea/
+
+#dataset and other project specific things
+data/MVTec_LOCO_AD_512size
+data/MVTec_LOCO_AD_512size.zip
+data/mvtec_loco_anomaly_detection.tar.xz
+scripts/outputs
