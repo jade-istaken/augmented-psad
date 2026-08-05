@@ -85,7 +85,7 @@ class PatchMemoryBank:
     def score(self,
               test_embeddings: torch.Tensor,
               feature_map_shape: Tuple[int,int]
-              )-> Tuple[torch.T, float]:
+              )-> Tuple[torch.Tensor, float]:
         #computes the path-level anomaly scores and then aggregates them
         device = test_embeddings.device
         memory_bank = self.memory_bank.to(device) #just make sure that all the tensors are on the same device
