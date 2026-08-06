@@ -1,13 +1,78 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from pathlib import Path
 import argparse
 import numpy as np
-
+import os
 from models.segmentation import Segmenter
 from data.dataset import MVTecLOCODataLoader, MVTecLOCODataset
+
+COLOR_PALETTE = np.array([[0, 0, 0],
+[204, 241, 227],
+[112, 142, 18],
+[254, 8, 23],
+[207, 149, 84],
+[202, 24, 214],
+[230, 192, 37],
+[241, 80, 68],
+[74, 127, 0],
+[2, 81, 216],
+[24, 240, 129],
+[20, 215, 125],
+[161, 31, 204],
+[254, 52, 116],
+[117, 198, 203],
+[4, 41, 68],
+[127, 252, 61],
+[21, 3, 142],
+[40, 10, 159],
+[241, 61, 36],
+[14, 175, 77],
+[144, 61, 115],
+[131, 79, 97],
+[109, 177, 163],
+[58, 198, 140],
+[17, 235, 168],
+[47, 128, 91],
+[238, 103, 45],
+[124, 35, 228],
+[101, 48, 232],
+[74, 124, 114],
+[78, 49, 30],
+[35, 167, 27],
+[137, 231, 47],
+[235, 32, 39],
+[56, 112, 32],
+[62, 173, 79],
+[86, 44, 201],
+[77, 47, 217],
+[246, 223, 57]])
+
+def save_pseudo_label_samples(images: torch.Tensor, logits: torch.Tensor, epoch:int, save_dir:str="./pseudo_label_samples"):
+    os.makedirs(save_dir, exist_ok=True)
+
+    images_np = images.detach().cpu().clamp(0,1).numpy()
+    images_np = (images_np *255).astype(np.uint8).transpose(0,2,3,1)
+
+    preds = torch.argmax(logits,dim=1).detach().cpu().numpy()
+
+    for i in range(images_np.shape[0]):
+        img_pil = Image.fromarray(images_np[i]) #convert to PIL image
+
+        mask_rgb = COLOR_PALETTE[preds[i]] #map class indices to rgb colors
+        mask_pil = Image.fromarray(mask_rgb)
+
+        total_width = img_pil.width + mask_pil.width
+        max_height = max(img_pil.height, mask_pil.height)
+        combined = Image.new('RGB', (total_width, max_height))
+        combined.paste(img_pil, (0, 0))
+        combined.paste(mask_pil, (img_pil.width, 0)) #concatenate mask and original horizontally
+
+        path = os.path.join(save_dir, f"epoch_{epoch}_sample_{i}.png")
+        combined.save(path)
 
 def generate_pseudo_labels(model: nn.Module, dataloader: DataLoader, device: torch.device) -> torch.Tensor:
     #run inference on the unlabeled training set to generate pseudo-masks
