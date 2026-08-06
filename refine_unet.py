@@ -54,7 +54,7 @@ COLOR_PALETTE = np.array([[0, 0, 0],
 def save_pseudo_label_samples(images: torch.Tensor, logits: torch.Tensor, epoch:int, save_dir:str="./pseudo_label_samples"):
     os.makedirs(save_dir, exist_ok=True)
 
-    images_np = images.detach().cpu().clamp(0,1).numpy()
+    images_np = images.detach().cpu().numpy()
     images_np = (images_np *255).astype(np.uint8).transpose(0,2,3,1)
 
     preds = torch.argmax(logits,dim=1).detach().cpu().numpy()
@@ -62,7 +62,7 @@ def save_pseudo_label_samples(images: torch.Tensor, logits: torch.Tensor, epoch:
     for i in range(images_np.shape[0]):
         img_pil = Image.fromarray(images_np[i]) #convert to PIL image
 
-        mask_rgb = COLOR_PALETTE[preds[i]] #map class indices to rgb colors
+        mask_rgb = COLOR_PALETTE[preds[i]].astype(np.uint8) #map class indices to rgb colors
         mask_pil = Image.fromarray(mask_rgb)
 
         total_width = img_pil.width + mask_pil.width
@@ -82,7 +82,7 @@ def generate_pseudo_labels(model: nn.Module, dataloader: DataLoader, device: tor
 
     with torch.no_grad():
         for batch in dataloader:
-            imgs = batch['immage'].to(device)
+            imgs = batch['image'].to(device)
             coords = batch['coord'].to(device)
 
             logits = model(imgs, coords)
@@ -105,6 +105,7 @@ class PseudoLabelDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.original_dataset[idx]
         sample['mask'] = self.pseudo_masks[idx]
+        return sample
 
 def train_phase_two(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -161,7 +162,7 @@ def train_phase_two(args):
         avg_loss = epoch_loss / len(pseudo_loader)
         print(f"Epoch[{epoch+1}/{args.epochs}] | Loss: {avg_loss:.4f}")
 
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 10 == 0 or epoch+1 == args.epochs:
             phase2_model.eval()
             with torch.no_grad():
                 # Grab a single batch from your pseudo-label dataloader
