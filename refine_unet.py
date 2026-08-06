@@ -161,6 +161,19 @@ def train_phase_two(args):
         avg_loss = epoch_loss / len(pseudo_loader)
         print(f"Epoch[{epoch+1}/{args.epochs}] | Loss: {avg_loss:.4f}")
 
+        if (epoch + 1) % 10 == 0:
+            phase2_model.eval()
+            with torch.no_grad():
+                # Grab a single batch from your pseudo-label dataloader
+                sample_batch = next(iter(pseudo_loader))
+                sample_imgs = sample_batch['image'].to(device)
+                sample_coords = sample_batch['coord'].to(device)
+
+                sample_logits = phase2_model(sample_imgs, sample_coords)
+                save_pseudo_label_samples(sample_imgs, sample_logits, epoch + 1)
+
+            phase2_model.train()
+
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     torch.save(phase2_model.state_dict(), save_dir / f"{args.category}_phase2.pth")
