@@ -60,7 +60,7 @@ def train_phase_one(args):
     print(f"Starting Phase 1 Training for category: {args.category}")
 
     model.train()
-    for epoch in range(args.epoch):
+    for epoch in range(args.epochs):
         epoch_loss = 0.0
 
         unlabeled_iter = iter(unlabeled_loader) #this iterator goes through the unlabeled items
