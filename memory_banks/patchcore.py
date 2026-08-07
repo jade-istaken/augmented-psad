@@ -62,12 +62,15 @@ class PatchMemoryBank:
     def __init__(self,
                  num_neighbors = 9,
                  sampling_ratio = 0.1,
-                 target_image_size = (256,256)):
+                 target_image_size = (256,256),
+                 batch_size: int = 10000):
         self.num_neighbors = num_neighbors
         self.sampling_ratio = sampling_ratio
         self.target_image_size = target_image_size
         self.memory_bank: torch.Tensor | None = None
         self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
+        self.batch_size = batch_size
+        self.max_train_distance = 1.0
 
     def build(self, embeddings: torch.Tensor):
         #builds the memory bank from embeddings
@@ -76,11 +79,29 @@ class PatchMemoryBank:
         else:
             self.memory_bank = embeddings
 
+        self.max_train_distance = self._compute_adaptive_scaling(embeddings)
         print(f"Patch memory bank built with {self.memory_bank.shape[0]} patches")
 
     def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float):
         sampler = KCenterGreedy(embedding=embeddings, sampling_ratio=sampling_ratio)
         return sampler.sample_coreset()
+
+    def _compute_adaptive_scaling(self, embeddings: torch.Tensor) -> float:
+        #compute the max nearest neighbor distance across all training batches
+        device = embeddings.device
+        max_dist = 0.0
+        memory_bank = self.memory_bank.to(device)
+
+        #iterate through embeddings in batches to avoid out of memory errors
+        for i in range(0, embeddings.shape[0], self.batch_size):
+            batch = embeddings[i:i+self.batch_size].to(device)
+            distances = torch.cdist(batch, memory_bank, p=2.0) #shape: [batch_size, memory_bank_size]
+            min_dists = distances.min(dim=1)[0]
+
+            batch_max = min_dists.max().item()
+            if batch_max > max_dist:
+                max_dist = batch_max
+        return max(max_dist, 1e-8)
 
     def score(self,
               test_embeddings: torch.Tensor,
