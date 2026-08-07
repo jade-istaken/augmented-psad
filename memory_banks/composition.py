@@ -74,14 +74,11 @@ class CompositionMemoryBank:
         return torch.stack(composition_vectors, dim=0) #stack and return the list of vectors, shape is [B, num_classes*C
 
     def build(self,
-              images: torch.Tensor,
+              features: torch.Tensor,
               masks: torch.Tensor
               ):
-        #images should be of shape [B,3,H,W] and maks should; be [B,H,W]
-        print("Building Composition Memory Bank")
+        #features should be of shape [N, C, H, W] and maks should; be [B,H,W]
 
-        features = self.extract_features(images)
-        print(f"Extracted features shape: {features.shape}")
 
         composition_vectors = self.compute_class_embeddings(features,masks)
         print(f"Composition vectors shape: {composition_vectors.shape}")
@@ -112,20 +109,19 @@ class CompositionMemoryBank:
         self.max_train_distance = max(max_dist, 1e-8)
 
     def score(self,
-              image: torch.Tensor,
+              features: torch.Tensor,
               mask: torch.Tensor
               ) -> Tuple[torch.Tensor,float]:
-        #image should be [1,3,H,W] and mask should be [1,H,W]
+        #features should be [1, C, H, W] and mask should be [1,H,W]
         #ensure correct dimensions first
-        if image.dim() == 3:
-            image = image.unsqueeze(0)
+        if features.dim() == 3:
+            features = features.unsqueeze(0)
         if mask.dim() == 3:
             mask = mask.squeeze(0)
 
-        device = image.device
+        device = features.device
         memory_bank = self.memory_bank.to(device)  # move memory bank to same device as image tensor
 
-        features = self.extract_features(image)
         composition_vector = self.compute_class_embeddings(features, mask) #compute the composition vector
         composition_vector = functional.normalize(composition_vector, p=2, dim=1) #normalize it
 
