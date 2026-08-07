@@ -126,6 +126,6 @@ class PatchMemoryBank:
         )
         anomaly_map_smoothed = self.blur(anomaly_map_upscaled)
 
-        anomaly_score = torch.max(min_distances).item() / 10.0 #calculate the image-level score by max pooling over spatial dimensions
+        anomaly_score = torch.max(min_distances).item() / self.max_train_distance #calculate the image-level score by max pooling over spatial dimensions
 
         return anomaly_map_smoothed.squeeze().cpu(), anomaly_score
