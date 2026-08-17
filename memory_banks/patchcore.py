@@ -1,3 +1,4 @@
+import math
 from typing import Tuple
 import torch
 import torch.nn as nn
@@ -21,42 +22,99 @@ class GaussianBlur2d(nn.Module):
         padding = self.kernel_size // 2
         return functional.conv2d(input_tensor, self.kernel, padding=padding)
 
+class SparseRandomProjection(nn.Module):
+    #reimplenting johnson-lindenstrauss SRP like from scikit but torch native
+    def __init__(self, epsilon: float = 0.9):
+        super().__init__()
+        self.epsilon = epsilon
+        self.num_components: int = 0
+        self.register_buffer("components_", torch.tensor([]))
+        self.is_fitted: bool = False
+
+    def fit(self, input_tensor: torch.Tensor):
+        num_samples, num_features = input_tensor.shape
+
+        #set number of components to the minimum bound of the j-l lemma (num_components >= 4 log(n_samples) / (eps^2 / 2 - eps^3 / 3))
+        denominator = (self.epsilon ** 2 / 2.0) - (self.epsilon ** 3 / 3.0)
+        numerator = 4 * math.log(num_samples)
+        num_components = int(math.ceil(numerator/denominator)) #use a ceiling operation to make sure that it never undershoots component count
+
+        self.num_components = min(num_components, num_features) #if the number of features is less than the theoretical bound we can just use the number of features
+
+        #initialize the projection matrix with a normal distribution that's been scaled by 1/sqrt(num_components) to preserve distance
+        new_components = torch.randn(
+            num_features, self.num_components, dtype=input_tensor.dtype, device=input_tensor.device
+        ) / math.sqrt(self.num_components)
+
+        self.register_buffer("components_", new_components)
+        self.is_fitted = True
+
+    def transform(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        if not self.is_fitted:
+            raise ValueError("please fit the model before transform by calling fit() first")
+        return torch.matmul(input_tensor, self.components_)
+
 class KCenterGreedy:
     #coreset subsampling algorithm for selection of normal patches
     def __init__(self, embedding: torch.Tensor, sampling_ratio: float):
-        self.embedding = embedding.detach().cpu().numpy()
+        self.embedding = embedding.detach()
         self.sampling_ratio = sampling_ratio
         self.num_samples = int(len(self.embedding) * sampling_ratio)
-        self.min_distances = None
+        self.projection = SparseRandomProjection(epsilon=0.9)
 
-    def _pairwise_distances(self, x: np.ndarray, y: np.ndarray | None = None):
+        self.features: torch.Tensor | None = None
+        self.features_normal_squared: torch.Tensor | None = None
+        self.min_distances: torch.Tensor | None = None
+
+    def _pairwise_distances(self, x: torch.Tensor, y: torch.Tensor | None = None):
         if y is None:
             y = x
-        x_norm = (x ** 2).sum(axis=1).reshape(-1, 1)
-        y_norm = (y ** 2).sum(axis=1).reshape(1, -1)
-        distances = x_norm + y_norm - 2.0 * np.dot(x,y.T)
-        distances = np.maximum(distances, 0.0) #floating point cleanup
-        return np.sqrt(distances)
+        return torch.cdist(x,y, p=2.0)
 
-    def sample_coreset(self):
+    def sample_coreset(self) -> torch.Tensor:
         #iteratively select the point furthest away from already chosen points
         if self.num_samples >= len(self.embedding):
-            return torch.tensor(self.embedding)
+            return self.embedding.clone()
 
-        selected_indices = [np.random.randint(0, len(self.embedding))]
-        self.min_distances = self._pairwise_distances(self.embedding, self.embedding[selected_indices]).min(axis=1)
+        #fit the embeddings to a lower dimensional space so it stops crashing immediately upon call
+        print("beginning projection")
+        self.projection.fit(self.embedding)
+        print("projection fitted")
+        self.features = self.projection.transform(self.embedding).detach()
+        self.features_normal_squared = torch.sum(self.features ** 2, dim=1)
+        print("projection transformed")
 
-        for _ in range(1, self.num_samples):
-            #iteratively select maximum minimum distance
-            new_idx = np.argmax(self.min_distances)
+        first_idx = torch.randint(0, len(self.features), (1,)).item() #changed to use torch.randint to improve reproduceability
+        selected_indices = [first_idx]
+
+        first_center = self.features[first_idx].squeeze()
+        first_center_normal_squared = torch.sum(first_center ** 2)
+        print("calculated first center")
+        dot_product = torch.matmul(self.features, first_center)
+        dist_squared = self.features_normal_squared + first_center_normal_squared - 2 * dot_product
+        self.min_distances = torch.sqrt(torch.clamp(dist_squared, min=0.0)).detach()
+        print("calculated first distance pair")
+
+        for i in range(1, self.num_samples):
+
+            new_idx = torch.argmax(self.min_distances).item()
             selected_indices.append(new_idx)
 
-            #update minimum distances
-            new_distances = self._pairwise_distances(self.embedding, self.embedding[selected_indices])
-            self.min_distances = np.minimum(self.min_distances, new_distances.min(axis=1))
 
-        selected_embeddings = self.embedding[selected_indices]
-        return torch.tensor(selected_embeddings, dtype=torch.float32)
+            new_center = self.features[new_idx]
+            new_center_normal_squared = torch.sum(new_center ** 2)
+            dot_product = torch.matmul(self.features, new_center)
+            dist_squared = self.features_normal_squared + new_center_normal_squared - 2 * dot_product
+
+            new_distances = torch.sqrt(torch.clamp(dist_squared, min=0.0)).detach()
+
+            self.min_distances = torch.minimum(self.min_distances, new_distances).detach()
+            print(f"pair {i} of {self.num_samples}, distance: {new_distances}")
+            if i % 10 == 0:
+                if self.features.is_cuda:
+                    torch.cuda.empty_cache()
+
+        return self.embedding[selected_indices]
 
 class PatchMemoryBank:
     def __init__(self,
@@ -72,14 +130,18 @@ class PatchMemoryBank:
         self.batch_size = batch_size
         self.max_train_distance = 1.0
 
+        self.mean: torch.Tensor | None = None
+        self.std: torch.Tensor | None = None
+
     def build(self, embeddings: torch.Tensor):
         #builds the memory bank from embeddings
         if self.sampling_ratio < 1.0:
+            print("Beginning coreset subsampling")
             self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
         else:
             self.memory_bank = embeddings
 
-        self.max_train_distance = self._compute_adaptive_scaling(embeddings)
+        self._standardize_memory_bank()
         print(f"Patch memory bank built with {self.memory_bank.shape[0]} patches")
 
     def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float):
@@ -103,12 +165,19 @@ class PatchMemoryBank:
                 max_dist = batch_max
         return max(max_dist, 1e-8)
 
+    def _standardize_memory_bank(self):
+        self.mean = self.memory_bank.mean(dim=0, keepdim=True)
+        self.std = self.memory_bank.std(dim=1, keepdim=True) + 1e-8 # (add a tiny epsilon factor for later division)
+        self.memory_bank = (self.memory_bank - self.mean) / self.std
+
     def score(self,
               test_embeddings: torch.Tensor,
               feature_map_shape: Tuple[int,int]
               )-> Tuple[torch.Tensor, float]:
         #computes the path-level anomaly scores and then aggregates them
         device = test_embeddings.device
+
+        test_embeddings_norm = (test_embeddings - self.mean.to(device)) / self.std.to(device) #normalized embeddings
         memory_bank = self.memory_bank.to(device) #just make sure that all the tensors are on the same device
 
         distances = torch.cdist(test_embeddings, memory_bank, p=2.0)
@@ -124,8 +193,9 @@ class PatchMemoryBank:
             mode="bilinear",
             align_corners=False
         )
+        self.blur = self.blur.to(device)
         anomaly_map_smoothed = self.blur(anomaly_map_upscaled)
 
-        anomaly_score = torch.max(min_distances).item() / self.max_train_distance #calculate the image-level score by max pooling over spatial dimensions
+        anomaly_score = torch.max(min_distances).item()
 
         return anomaly_map_smoothed.squeeze().cpu(), anomaly_score
