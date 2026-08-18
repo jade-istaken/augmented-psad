@@ -2,10 +2,11 @@
 from typing import Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as functional
 import numpy as np
 
-class CompositionMemoryBank:
+class CompositionMemoryBank(nn.Module):
     #stores the feature compositions of classes by averaging the pixel-level feature vectors of each class
 
     def __init__(self,
@@ -13,12 +14,14 @@ class CompositionMemoryBank:
                  feature_channels: int,
                  feature_extractor: torch.nn.Module
                  ):
+        super().__init__()
         #feature channels refers to the number of channels in the fgeature maps from the backbone
         self.num_classes = num_classes
         self.feature_channels = feature_channels
         self.feature_extractor = feature_extractor
-        self.memory_bank: torch.Tensor | None = None
-        self.max_train_distance = 0.0
+        #self.memory_bank: torch.Tensor | None = None
+        self.register_buffer("memory_bank", torch.tensor([]))
+        self.register_buffer("max_train_distance", torch.tensor(0.0))
         self.present_classes: set = set() #set used to track which classes are present in the training data
 
     def extract_features(self, images: torch.Tensor) -> torch.Tensor:
@@ -94,7 +97,7 @@ class CompositionMemoryBank:
         # compute the maximum anomaly score within the normal samples
         # this is used to later normalize test scores to [0,1]
         if self.memory_bank is None or len(self.memory_bank) < 2:
-            self.max_train_distance = 1.0
+            self.max_train_distance = torch.tensor(1.0)
             return
 
         max_dist = 0.0
@@ -106,7 +109,7 @@ class CompositionMemoryBank:
             if min_dist > max_dist:
                 max_dist = min_dist
 
-        self.max_train_distance = max(max_dist, 1e-8)
+        self.max_train_distance = torch.tensor(max(max_dist, 1e-8))
 
     def score(self,
               features: torch.Tensor,
@@ -128,7 +131,7 @@ class CompositionMemoryBank:
         distances = torch.cdist(composition_vector, self.memory_bank,p=2.0)
         raw_distance = distances.min().item()
 
-        normalized_score = raw_distance / self.max_train_distance
+        normalized_score = raw_distance / self.max_train_distance.item()
         normalized_score = min(normalized_score, 1.0) #clamp to [0,1]
 
         return torch.Tensor(raw_distance), normalized_score

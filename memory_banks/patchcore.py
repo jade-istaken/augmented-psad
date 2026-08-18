@@ -116,22 +116,27 @@ class KCenterGreedy:
 
         return self.embedding[selected_indices]
 
-class PatchMemoryBank:
+class PatchMemoryBank(nn.Module):
     def __init__(self,
                  num_neighbors = 9,
                  sampling_ratio = 0.1,
                  target_image_size = (256,256),
                  batch_size: int = 10000):
+        super().__init__()
         self.num_neighbors = num_neighbors
         self.sampling_ratio = sampling_ratio
         self.target_image_size = target_image_size
-        self.memory_bank: torch.Tensor | None = None
         self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
         self.batch_size = batch_size
         self.max_train_distance = 1.0
 
-        self.mean: torch.Tensor | None = None
-        self.std: torch.Tensor | None = None
+        # self.memory_bank: torch.Tensor | None = None
+        # self.mean: torch.Tensor | None = None
+        # self.std: torch.Tensor | None = None
+        #register all these as buffers so they move to devices easily and also save in the state_dict
+        self.register_buffer("memory_bank", torch.tensor([]))
+        self.register_buffer("mean", torch.tensor([]))
+        self.register_buffer("std", torch.tensor([]))
 
     def build(self, embeddings: torch.Tensor):
         #builds the memory bank from embeddings
@@ -139,7 +144,7 @@ class PatchMemoryBank:
             print("Beginning coreset subsampling")
             self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
         else:
-            self.memory_bank = embeddings
+            self.memory_bank = embeddings.clone()
 
         self._standardize_memory_bank()
         print(f"Patch memory bank built with {self.memory_bank.shape[0]} patches")

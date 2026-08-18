@@ -113,12 +113,14 @@ def build_banks(args):
     save_dir = Path(args.save_dir) / args.category
     save_dir.mkdir(parents=True,exist_ok=True)
 
-    torch.save({
-        'hist_bank': hist_bank,
-        'comp_bank': comp_bank,
-        'patch_bank': patch_bank,
+    save_dict = {
+        'patch_bank': patch_bank.state_dict(),
+        'hist_bank': hist_bank.state_dict(),  # Assuming hist_bank is also an nn.Module
+        'comp_bank': comp_bank.state_dict(),  # Assuming comp_bank is also an nn.Module
         'scaler': scaler
-    }, save_dir / 'memory_banks.pth')
+    }
+
+    torch.save(save_dict, save_dir / 'memory_banks.pth')
     print(f"Memory banks and scaler saved to {save_dir / 'memory_banks.pth'}")
 
 

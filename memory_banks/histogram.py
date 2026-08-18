@@ -1,15 +1,18 @@
 from typing import Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as functional
 
-class HistogramMemoryBank:
+class HistogramMemoryBank(nn.Module):
     #class histogram memory bank (stores the distribution of classes in the normal images
     #used for comparison of class distribution is test images
     def __init__(self, num_classes: int):
+        super().__init__()
         self.num_classes = num_classes
-        self.memory_bank: torch.Tensor | None = None
-        self.max_train_distance = 0.0 #used for the adaptive scaling of scores later on
+        #self.memory_bank: torch.Tensor | None = None
+        self.register_buffer("memory_bank", torch.tensor([]))
+        self.register_buffer("max_train_distance", torch.tensor(0.0)) #used for the adaptive scaling of scores later on
 
     def build(self, masks: torch.Tensor):
         #build the memory bank from normal masks
@@ -29,7 +32,7 @@ class HistogramMemoryBank:
         #this is used to later normalize test scores to [0,1]
         if self.memory_bank is None or len(self.memory_bank) == 0:
             #in the case of an empty memory bank the max_train_distance simply becomes 1 as normalization doesn't occur
-            self.max_train_distance = 1.0
+            self.max_train_distance = torch.tensor(1.0)
             return
 
         max_dist = 0.0
@@ -40,7 +43,7 @@ class HistogramMemoryBank:
             if min_dist > max_dist:
                 max_dist = min_dist
 
-        self.max_train_distance = max(max_dist, 1e-8) #add a lower bound so that there isn't divide by zero when it comes to scaling
+        self.max_train_distance = torch.tensor(max(max_dist, 1e-8)) #add a lower bound so that there isn't divide by zero when it comes to scaling
 
     def score(self, test_mask: torch.Tensor) -> Tuple[torch.Tensor, float]:
         counts = torch.bincount(test_mask.flatten(), minlength=self.num_classes).float()
@@ -53,7 +56,7 @@ class HistogramMemoryBank:
         distances = torch.cdist(test_proportions, memory_bank, p=2.0) #expected shape is [1, N] where N is number of histograms
 
         raw_distance = distances.min().item()
-        normalized_score = raw_distance / self.max_train_distance
+        normalized_score = raw_distance / self.max_train_distance.item()
         normalized_score = min(normalized_score, 1.0) #clamp to [0,1]
 
         return torch.tensor(raw_distance), normalized_score
