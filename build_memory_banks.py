@@ -49,7 +49,7 @@ def build_banks(args):
     #begin collecting the relevant data for the banks
     print("Extracting features and masks from normal training data")
     all_masks = []
-    all_composition_data = [] #List[(features,masks)]
+    all_composition_features = [] #List[(features)]
     all_patch_embeddings = []
 
     with torch.no_grad():
@@ -58,30 +58,49 @@ def build_banks(args):
             coords = batch['coord'].to(device)
 
             seg_logits = seg_model(imgs, coords)
-            seg_masks = torch.argmax(seg_logits, dim=1) #[B,H,W]
-            all_masks.append(seg_masks.cpu())
+            seg_masks = torch.argmax(seg_logits, dim=1)  # [B,H,W]
 
-            features = feature_extractor(imgs) # [B,C,H,W]
-            all_composition_data.append((features.cpu(), seg_masks.cpu()))
+            features = feature_extractor(imgs)  # [B,C,H,W]
+
+            seg_masks_cpu = seg_masks.cpu() #moved to cpu immediately to free vram
+            features_cpu = features.cpu()
+
+            all_masks.append(seg_masks_cpu)
+            all_composition_features.append(features_cpu)
 
             #flatten features for patch bank
-            B,C,H,W = features.shape
-            flat_embeddings = features.permute(0,2,3,1).reshape(-1,C)
-            all_patch_embeddings.append(flat_embeddings.cpu())
+            B, C, H, W = features_cpu.shape
+            flat_embeddings = features_cpu.permute(0, 2, 3, 1).reshape(-1, C)
+            all_patch_embeddings.append(flat_embeddings)
+            del imgs, coords, seg_logits, seg_masks, features #explicitly delete these to stop over-caching
 
     #build the banks
-    print("Building histogram memory bank")
     hist_masks = torch.cat(all_masks, dim=0)
+
+    #just reuse the mask tensor for space saving
+    comp_masks = hist_masks
+    del all_masks  # free the list immediately
+    # concatenate the features
+    comp_features = torch.cat(all_composition_features, dim=0)
+    del all_composition_features
+    #concatenate patches
+    patch_embeddings = torch.cat(all_patch_embeddings, dim=0)
+    del all_patch_embeddings
+
+    #lkets just force garbage collection too
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # build the banks
+    print("Building histogram memory bank")
     hist_bank.build(hist_masks)
 
-    print("building composition memory bank")
-    #concatenate the features and masks
-    comp_features = torch.cat([data[0] for data in all_composition_data], dim=0)
-    comp_masks = torch.cat([data[1] for data in all_composition_data], dim=0 )
+    print("Building composition memory bank")
     comp_bank.build(comp_features, comp_masks)
 
-    print("Building patch memory bank (Probably going to take a while because of coreset subsampling)")
-    patch_embeddings = torch.cat(all_patch_embeddings)
+    print("Building patch memory bank (This will take a while due to coreset subsampling)")
     patch_bank.build(patch_embeddings)
 
     #Record the adaptive sfcaling statistics into the scaler
@@ -89,7 +108,7 @@ def build_banks(args):
 
     scaler.max_scores['hist'] = hist_bank.max_train_distance
     scaler.max_scores['comp'] = comp_bank.max_train_distance
-    scaler.max_scores['patch'] = patch_bank.max_train_distances
+    scaler.max_scores['patch'] = patch_bank.max_train_distance
 
     save_dir = Path(args.save_dir) / args.category
     save_dir.mkdir(parents=True,exist_ok=True)
