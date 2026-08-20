@@ -26,7 +26,7 @@ def build_banks(args):
     #trained segmentation model from phase 2 (refine_unet.py)
     seg_model_path = Path(args.seg_checkpoint)
     seg_model = Segmenter(num_classes=args.num_classes, use_coord=True, pretrained=False).to(device)
-    seg_model.load_state_dict(torch.load(seg_model_path / f"{args.category}_phase2.pth"))
+    seg_model.load_state_dict(torch.load(Path(args.seg_checkpoint)))
     seg_model.eval()
 
     #frozen feature extractor backbone for memory banks
