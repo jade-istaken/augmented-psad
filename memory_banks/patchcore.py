@@ -190,7 +190,7 @@ class PatchMemoryBank(nn.Module):
     def score(self,
               test_embeddings: torch.Tensor,
               feature_map_shape: Tuple[int,int]
-              )-> Tuple[torch.Tensor, float]:
+              )-> Tuple[torch.Tensor, float, float]:
         #computes the path-level anomaly scores and then aggregates them
         device = test_embeddings.device
 
@@ -214,5 +214,6 @@ class PatchMemoryBank(nn.Module):
         anomaly_map_smoothed = self.blur(anomaly_map_upscaled)
 
         anomaly_score = torch.max(min_distances).item()
+        anomaly_score_normalized = (anomaly_score - self.mean) / self.std
 
-        return anomaly_map_smoothed.squeeze().cpu(), anomaly_score
+        return anomaly_map_smoothed.squeeze().cpu(), anomaly_score, anomaly_score_normalized

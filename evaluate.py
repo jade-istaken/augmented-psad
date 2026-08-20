@@ -65,8 +65,11 @@ def evaluate(args):
         for atype in test_loaders:  # iterate through the test loaders one by one
             loader = test_loaders[atype]
             hist_anomaly_score = 0.0
+            norm_hist_anomaly_score = 0.0
             comp_anomaly_score = 0.0
+            norm_comp_anomaly_score = 0.0
             patch_anomaly_score = 0.0
+            norm_patch_anomaly_score = 0.0
             for batch in tqdm(loader):
                 imgs = batch['image'].to(device)
                 coords = batch['coord'].to(device)
@@ -76,15 +79,26 @@ def evaluate(args):
                 features = feature_extractor(imgs)
                 B, C, H, W = features.shape
 
-                hist_anomaly_score += hist_bank.score(seg_masks)[1]
-                comp_anomaly_score += comp_bank.score(features, seg_masks)[1]
+                hist_anomaly_scores = hist_bank.score(seg_masks)
+                comp_anomaly_scores = comp_bank.score(features, seg_masks)
                 flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
-                patch_anomaly_score += patch_bank.score(flat_embeddings, (H, W))[1]
+                patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
+
+                hist_anomaly_score+= hist_anomaly_scores[0]
+                norm_hist_anomaly_score+=hist_anomaly_scores[1]
+                comp_anomaly_score+= comp_anomaly_scores[0]
+                norm_comp_anomaly_score+=comp_anomaly_scores[1]
+                patch_anomaly_score+=patch_anomaly_scores[1]
+                norm_patch_anomaly_score+=patch_anomaly_scores[2]
             avg_hist_score = hist_anomaly_score / len(loader)
             avg_comp_score = comp_anomaly_score / len(loader)
             avg_patch_score = patch_anomaly_score / len(loader)
-            print(
-                f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
+            norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
+            norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
+            norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
+
+            print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
+            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f}")
 
 
 if __name__ == "__main__":

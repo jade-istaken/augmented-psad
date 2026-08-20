@@ -105,7 +105,8 @@ class CompositionMemoryBank(nn.Module):
         for i in range(len(self.memory_bank)):
             test_vec = self.memory_bank[i].unsqueeze(0)
             distances = torch.cdist(test_vec, self.memory_bank, p=2.0)
-            min_dist = distances.min().item()
+            sorted_dists, _ = distances.sort(dim=1)
+            min_dist = sorted_dists[0, 1].item()
             if min_dist > max_dist:
                 max_dist = min_dist
 
@@ -114,7 +115,7 @@ class CompositionMemoryBank(nn.Module):
     def score(self,
               features: torch.Tensor,
               mask: torch.Tensor
-              ) -> Tuple[torch.Tensor,float]:
+              ) -> Tuple[float,float]:
         #features should be [1, C, H, W] and mask should be [1,H,W]
         #ensure correct dimensions first
         if features.dim() == 3:
@@ -134,4 +135,4 @@ class CompositionMemoryBank(nn.Module):
         normalized_score = raw_distance / self.max_train_distance.item()
         normalized_score = min(normalized_score, 1.0) #clamp to [0,1]
 
-        return torch.tensor(raw_distance), normalized_score
+        return raw_distance, normalized_score
