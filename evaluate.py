@@ -2,11 +2,43 @@ import torch
 import argparse
 from pathlib import Path
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import numpy as np
 
 from data.dataset import MVTecLOCODataLoader
 from memory_banks import HistogramMemoryBank, PatchMemoryBank, CompositionMemoryBank
 from models import init_backbone, FeatureExtractor, Segmenter
 
+def visualize_anomaly_map(image_tensor:torch.Tensor, anomaly_map: torch.Tensor, save_path):
+    #helper function to visualize anomaly masks
+    img_np = image_tensor.cpu().numpy().transpose(1, 2, 0)
+    img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+    img_np = np.clip(img_np, 0, 1)
+    print(f"Image stats - min: {img_np.min():.3f}, max: {img_np.max():.3f}, dtype: {img_np.dtype}")
+
+
+    anomaly_map_np = anomaly_map.cpu().numpy()
+    anomaly_map_np = (anomaly_map_np - anomaly_map_np.min()) / (anomaly_map_np.max() - anomaly_map_np.min() + 1e-8)
+
+    fig, axes = plt.subplots(1,3,figsize=(15,5))
+
+    axes[0].imshow(img_np, vmin=0, vmax=1)
+    axes[0].set_title("Original Image")
+    axes[0].axis('off')
+
+    im = axes[1].imshow(anomaly_map_np, cmap='jet')
+    axes[1].set_title("Anomaly Map")
+    axes[1].axis("off")
+    plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+
+    axes[2].imshow(img_np)
+    axes[2].imshow(anomaly_map_np, cmap='jet', alpha=0.5)
+    axes[2].set_title("Overlay")
+    axes[2].axis('off')
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
 
 def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,7 +92,11 @@ def evaluate(args):
     patch_bank.load_state_dict(patch_state, strict=False)
     patch_bank.to(device)
 
-    print("Beginning test run (good data)")
+    viz_dir = Path(args.save_dir) / args.category
+    viz_dir.mkdir(parents=True, exist_ok=True)
+    max_viz_samples = 5
+
+    print("Beginning test runs")
     with torch.no_grad():
         for atype in test_loaders:  # iterate through the test loaders one by one
             loader = test_loaders[atype]
@@ -69,8 +105,8 @@ def evaluate(args):
             comp_anomaly_score = 0.0
             norm_comp_anomaly_score = 0.0
             patch_anomaly_score = 0.0
-            norm_patch_anomaly_score = 0.0
-            for batch in tqdm(loader):
+            viz_count = 0
+            for batch_idx, batch in enumerate(tqdm(loader, desc=f"Testing {atype}")):
                 imgs = batch['image'].to(device)
                 coords = batch['coord'].to(device)
 
@@ -89,16 +125,23 @@ def evaluate(args):
                 comp_anomaly_score+= comp_anomaly_scores[0]
                 norm_comp_anomaly_score+=comp_anomaly_scores[1]
                 patch_anomaly_score+=patch_anomaly_scores[1]
-                norm_patch_anomaly_score+=patch_anomaly_scores[2]
+
+                if viz_count < max_viz_samples:
+                    #only visualize up to a max viz samples variable so that we're not flooding disk space for no reason
+                    orig_img = imgs[0].cpu()
+
+                    save_path = viz_dir / f"{atype}_sample_{batch_idx}.png"
+                    visualize_anomaly_map(orig_img, patch_anomaly_scores[0], save_path)
+                    viz_count += 1
+
             avg_hist_score = hist_anomaly_score / len(loader)
             avg_comp_score = comp_anomaly_score / len(loader)
             avg_patch_score = patch_anomaly_score / len(loader)
             norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
             norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
-            norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
 
             print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
-            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f}")
+            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
 
 
 if __name__ == "__main__":
