@@ -119,8 +119,8 @@ class CompositionMemoryBank(nn.Module):
         #ensure correct dimensions first
         if features.dim() == 3:
             features = features.unsqueeze(0)
-        if mask.dim() == 3:
-            mask = mask.squeeze(0)
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)
 
         device = features.device
         memory_bank = self.memory_bank.to(device)  # move memory bank to same device as image tensor
@@ -134,4 +134,4 @@ class CompositionMemoryBank(nn.Module):
         normalized_score = raw_distance / self.max_train_distance.item()
         normalized_score = min(normalized_score, 1.0) #clamp to [0,1]
 
-        return torch.Tensor(raw_distance), normalized_score
+        return torch.tensor(raw_distance), normalized_score

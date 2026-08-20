@@ -172,7 +172,7 @@ class PatchMemoryBank(nn.Module):
 
     def _standardize_memory_bank(self):
         self.mean = self.memory_bank.mean(dim=0, keepdim=True)
-        self.std = self.memory_bank.std(dim=1, keepdim=True) + 1e-8 # (add a tiny epsilon factor for later division)
+        self.std = self.memory_bank.std(dim=0, keepdim=True) + 1e-8 # (add a tiny epsilon factor for later division)
         self.memory_bank = (self.memory_bank - self.mean) / self.std
 
     def score(self,
