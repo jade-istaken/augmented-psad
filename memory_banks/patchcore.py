@@ -121,6 +121,7 @@ class PatchMemoryBank(nn.Module):
                  num_neighbors = 9,
                  sampling_ratio = 0.1,
                  target_image_size = (256,256),
+                 fast_dev_mode: bool = False,
                  batch_size: int = 10000):
         super().__init__()
         self.num_neighbors = num_neighbors
@@ -129,6 +130,7 @@ class PatchMemoryBank(nn.Module):
         self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
         self.batch_size = batch_size
         self.max_train_distance = 1.0
+        self.fast_dev_mode = fast_dev_mode
 
         # self.memory_bank: torch.Tensor | None = None
         # self.mean: torch.Tensor | None = None
@@ -141,8 +143,12 @@ class PatchMemoryBank(nn.Module):
     def build(self, embeddings: torch.Tensor):
         #builds the memory bank from embeddings
         if self.sampling_ratio < 1.0:
-            print("Beginning coreset subsampling")
-            self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
+            if self.fast_dev_mode:
+                print("Fast dev mode enabled: Using pure random subsampling.")
+                self.memory_bank = self._random_subsample(embeddings, self.sampling_ratio)
+            else:
+                print("Beginning coreset subsampling")
+                self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
         else:
             self.memory_bank = embeddings.clone()
 
@@ -152,6 +158,12 @@ class PatchMemoryBank(nn.Module):
     def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float):
         sampler = KCenterGreedy(embedding=embeddings, sampling_ratio=sampling_ratio)
         return sampler.sample_coreset()
+
+    def _random_subsample(self, embeddings: torch.Tensor, sampling_ratio: float) -> torch.Tensor:
+        #random subsampling for the purposes of faster dev because doing real subsampling takes like 3 hours
+        num_samples = int(len(embeddings) * sampling_ratio)
+        indices = torch.randperm(len(embeddings))[:num_samples]
+        return embeddings[indices]
 
     def _compute_adaptive_scaling(self, embeddings: torch.Tensor) -> float:
         #compute the max nearest neighbor distance across all training batches

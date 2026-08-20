@@ -212,7 +212,7 @@ class MVTecLOCODataLoader:
             category=self.category,
             split='test',
             image_size=self.image_size,
-            load_masks=True,
+            load_masks=False,
             anomaly_type=anomaly_type
         )
         return DataLoader(

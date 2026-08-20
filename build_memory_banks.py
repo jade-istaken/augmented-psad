@@ -44,7 +44,8 @@ def build_banks(args):
     patch_bank = PatchMemoryBank(
         num_neighbors=args.num_neighbors,
         sampling_ratio=args.sampling_ratio,
-        target_image_size=(512,512)
+        target_image_size=(512,512),
+        fast_dev_mode=args.random_patches
     )
     scaler = AdaptiveScaler()
 
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_neighbors", type=int, default=9)
     parser.add_argument("--sampling_ratio", type=float, default=0.1)
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
+    parser.add_argument("--random_patches", type=bool, default=False, help="Whether to use random sampling to speed up patchcore building")
 
     args = parser.parse_args()
     build_banks(args)
