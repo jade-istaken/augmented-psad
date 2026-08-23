@@ -85,8 +85,8 @@ class MVTecLOCODataset(Dataset):
                                 self.masks.append(None)
                         else:
                             self.masks.append(None)
-                    else:
-                        self.masks = [None] * len(img_files)
+                else:
+                    self.masks = [None] * len(img_files)
 
                 #set labels of the images
                 if self.anomaly_type == 'good':
@@ -109,13 +109,17 @@ class MVTecLOCODataset(Dataset):
         image = Image.open(self.images[idx]).convert('RGB')
         image = image.resize(self.image_size, Image.Resampling.BILINEAR) #shouldn't need to resize because they're preprocessed but it's a safety step
         image_tensor = torch.from_numpy(np.array(image)).permute(2,0,1).float()
+        _, H, W = image_tensor.shape
 
         #load mask if available
         mask_tensor = None
-        if self.load_masks and self.masks[idx] is not None and self.masks[idx].exists():
-            mask = Image.open(self.masks[idx])
-            mask = mask.resize(self.image_size, Image.Resampling.NEAREST)
-            mask_tensor = torch.from_numpy(np.array(mask)).long()
+        if self.load_masks:
+            if self.masks[idx] is not None and self.masks[idx].exists():
+                mask = Image.open(self.masks[idx])
+                mask = mask.resize(self.image_size, Image.Resampling.NEAREST)
+                mask_tensor = torch.from_numpy(np.array(mask)).long()
+            else:
+                mask_tensor = torch.zeros((H,W))
 
         coord_tensor = self._generate_coordinate_grid()
 
@@ -212,7 +216,7 @@ class MVTecLOCODataLoader:
             category=self.category,
             split='test',
             image_size=self.image_size,
-            load_masks=False,
+            load_masks=True,
             anomaly_type=anomaly_type
         )
         return DataLoader(
