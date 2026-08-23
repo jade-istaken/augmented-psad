@@ -129,7 +129,6 @@ class PatchMemoryBank(nn.Module):
         self.target_image_size = target_image_size
         self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
         self.batch_size = batch_size
-        self.max_train_distance = 1.0
         self.fast_dev_mode = fast_dev_mode
 
         # self.memory_bank: torch.Tensor | None = None
@@ -139,6 +138,7 @@ class PatchMemoryBank(nn.Module):
         self.register_buffer("memory_bank", torch.tensor([]))
         self.register_buffer("mean", torch.tensor([]))
         self.register_buffer("std", torch.tensor([]))
+        self.register_buffer("max_train_distance", torch.tensor(0.0))
 
     def build(self, embeddings: torch.Tensor):
         #builds the memory bank from embeddings
@@ -163,6 +163,7 @@ class PatchMemoryBank(nn.Module):
         #random subsampling for the purposes of faster dev because doing real subsampling takes like 3 hours
         num_samples = int(len(embeddings) * sampling_ratio)
         indices = torch.randperm(len(embeddings))[:num_samples]
+        print("Random subsampling Completed")
         return embeddings[indices]
 
     def _compute_adaptive_scaling(self, embeddings: torch.Tensor) -> float:
@@ -183,14 +184,34 @@ class PatchMemoryBank(nn.Module):
         return max(max_dist, 1e-8)
 
     def _standardize_memory_bank(self):
-        self.mean = self.memory_bank.mean(dim=0, keepdim=False)
-        self.std = self.memory_bank.std(dim=0, keepdim=False) + 1e-8 # (add a tiny epsilon factor for later division)
+        device = self.memory_bank.device
+        self.mean = self.memory_bank.mean(dim=0, keepdim=True)
+        self.std = self.memory_bank.std(dim=0, keepdim=True) + 1e-8 # (add a tiny epsilon factor for later division)
         self.memory_bank = (self.memory_bank - self.mean) / self.std
+
+        max_dist = 0.0
+        for i in range(0, self.memory_bank.shape[0], self.batch_size):
+            batch = self.memory_bank[i: i + self.batch_size]
+            batch_size_actual = batch.shape[0]
+
+            distances = torch.cdist(batch, self.memory_bank, p=2.0)
+
+            row_indices = torch.arange(batch_size_actual, device=device)
+            col_indices = torch.arange(i, i + batch_size_actual, device=device)
+            distances[row_indices, col_indices] = float('inf') #max out the self-distance so that that gets ignored
+
+            min_dists = distances.min(dim=1)[0] #find nearest neighbor distance for each element in the batch
+
+
+            batch_max = min_dists.max().item()
+            if batch_max > max_dist:
+                max_dist = batch_max
+        self.max_train_distance =  torch.tensor(max_dist + 1e-8, device=device)
 
     def score(self,
               test_embeddings: torch.Tensor,
               feature_map_shape: Tuple[int,int]
-              )-> Tuple[torch.Tensor, float]:
+              )-> Tuple[torch.Tensor, float, float]:
         #computes the path-level anomaly scores and then aggregates them
         device = test_embeddings.device
 
@@ -213,6 +234,7 @@ class PatchMemoryBank(nn.Module):
         self.blur = self.blur.to(device)
         anomaly_map_smoothed = self.blur(anomaly_map_upscaled)
 
-        anomaly_score = torch.max(min_distances).item()
+        raw_anomaly_score = torch.max(min_distances).item()
+        normalized_anomaly_score = min(raw_anomaly_score / self.max_train_distance.item(), 1.0)
 
-        return anomaly_map_smoothed.squeeze().cpu(), anomaly_score
+        return anomaly_map_smoothed.squeeze().cpu(), raw_anomaly_score, normalized_anomaly_score
