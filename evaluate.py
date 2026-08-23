@@ -1,3 +1,5 @@
+import json
+
 import torch
 import argparse
 from pathlib import Path
@@ -100,14 +102,17 @@ def evaluate(args):
     max_viz_samples = 5
 
     print("Beginning test runs")
+    all_metrics = {}
     all_labels = []
     all_combined_scores = []
     all_patch_maps = []
     all_gt_masks = []
     good_scores = [] #because doing normal metrics on the good subset is kind of meaningless
+    #by having these outside the loop, data from all datasets is accumalted, essentailly turning the 3 datasets into one single mixed dataset
 
     with torch.no_grad():
         for atype in test_loaders:  # iterate through the test loaders one by one
+
             loader = test_loaders[atype]
             hist_anomaly_score = 0.0
             norm_hist_anomaly_score = 0.0
@@ -156,26 +161,36 @@ def evaluate(args):
                     visualize_anomaly_map(orig_img, patch_anomaly_scores[0], save_path)
                     viz_count += 1
 
-            avg_hist_score = hist_anomaly_score / len(loader)
-            avg_comp_score = comp_anomaly_score / len(loader)
-            avg_patch_score = patch_anomaly_score / len(loader)
-            norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
-            norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
-            norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
-            avg_combined_score = np.mean(all_combined_scores)
-            avg_good_score = np.mean(good_scores)
+        avg_hist_score = hist_anomaly_score / len(loader)
+        avg_comp_score = comp_anomaly_score / len(loader)
+        avg_patch_score = patch_anomaly_score / len(loader)
+        norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
+        norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
+        norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
+        avg_combined_score = np.mean(all_combined_scores)
+        avg_good_score = np.mean(good_scores)
 
-            metrics = compute_metrics(gt_labels=np.array(all_labels), scores=np.array(all_combined_scores), gt_maps=np.array(all_gt_masks), pred_maps=np.array(all_patch_maps))
+        metrics = compute_metrics(gt_labels=np.array(all_labels), scores=np.array(all_combined_scores), gt_maps=np.array(all_gt_masks), pred_maps=np.array(all_patch_maps))
 
-            print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
-            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f} | combined score = {avg_combined_score:.4f}")
-            print(f"\n--- Results for {atype} ---")
-            if atype == "good":
-                print(f"Average anomaly score (surrogate FPR (Lower is better)): {avg_good_score:.4f}")
-            else:
-                for metric_name, value in metrics.items():
-                    print(f"{metric_name}: {value:.4f}")
-            print("--------------------------\n")
+        # print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
+        # print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f} | combined score = {avg_combined_score:.4f}")
+        print(f"\n--- Results Across whole dataset ---")
+        print(f"Average anomaly score across only good results (surrogate FPR (Lower is better)): {avg_good_score:.4f}")
+        for metric_name, value in metrics.items():
+            print(f"{metric_name}: {value:.4f}")
+        print("--------------------------\n")
+
+        metrics_save_path = bank_save_dir / 'evaluation_metrics.json'
+
+        #convert it to normal floats because if we don't json might get upset because it's gotta be serialized in a weird way or something
+        serializable_metrics = {}
+        for atype, metrics_dict in all_metrics.items():
+            serializable_metrics[atype] = {k: float(v) for k, v in metrics_dict.items()}
+
+        with open(metrics_save_path, 'w') as f:
+            json.dump(serializable_metrics, f, indent=4)
+
+        print(f"Successfully saved evaluation metrics to {metrics_save_path}")
 
 
 if __name__ == "__main__":
