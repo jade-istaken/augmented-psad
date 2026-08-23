@@ -8,13 +8,15 @@ import numpy as np
 from data.dataset import MVTecLOCODataLoader
 from memory_banks import HistogramMemoryBank, PatchMemoryBank, CompositionMemoryBank
 from models import init_backbone, FeatureExtractor, Segmenter
+from utils.metrics import compute_metrics
+
 
 def visualize_anomaly_map(image_tensor:torch.Tensor, anomaly_map: torch.Tensor, save_path):
     #helper function to visualize anomaly masks
     img_np = image_tensor.cpu().numpy().transpose(1, 2, 0)
     img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
     img_np = np.clip(img_np, 0, 1)
-    print(f"Image stats - min: {img_np.min():.3f}, max: {img_np.max():.3f}, dtype: {img_np.dtype}")
+    #print(f"Image stats - min: {img_np.min():.3f}, max: {img_np.max():.3f}, dtype: {img_np.dtype}")
 
 
     anomaly_map_np = anomaly_map.cpu().numpy()
@@ -66,7 +68,7 @@ def evaluate(args):
 
     hist_state = memory_bank_states['hist_bank']
     hist_bank = HistogramMemoryBank(num_classes=args.num_classes)
-    hist_bank.memory_bank = hist_state.pop('memory_bank')
+    hist_bank.memory_bank = hist_state.pop('memory_bank') #we have to do all these state pop things because the tensor of the filled memory bank is necessarily a different shape from the empty one
     hist_bank.load_state_dict(hist_state, strict=False)
     hist_bank.to(device)
 
@@ -89,6 +91,7 @@ def evaluate(args):
     patch_bank.memory_bank = patch_state.pop('memory_bank')
     patch_bank.mean = patch_state.pop('mean')
     patch_bank.std = patch_state.pop('std')
+    patch_bank.max_train_distance = patch_state.pop('max_train_distance')
     patch_bank.load_state_dict(patch_state, strict=False)
     patch_bank.to(device)
 
@@ -97,6 +100,12 @@ def evaluate(args):
     max_viz_samples = 5
 
     print("Beginning test runs")
+    all_labels = []
+    all_combined_scores = []
+    all_patch_maps = []
+    all_gt_masks = []
+    good_scores = [] #because doing normal metrics on the good subset is kind of meaningless
+
     with torch.no_grad():
         for atype in test_loaders:  # iterate through the test loaders one by one
             loader = test_loaders[atype]
@@ -105,10 +114,13 @@ def evaluate(args):
             comp_anomaly_score = 0.0
             norm_comp_anomaly_score = 0.0
             patch_anomaly_score = 0.0
+            norm_patch_anomaly_score = 0.0
             viz_count = 0
+
             for batch_idx, batch in enumerate(tqdm(loader, desc=f"Testing {atype}")):
                 imgs = batch['image'].to(device)
                 coords = batch['coord'].to(device)
+                labels = batch['label'].to(device)
 
                 seg_logits = seg_model(imgs, coords)
                 seg_masks = torch.argmax(seg_logits, dim=1)
@@ -125,6 +137,16 @@ def evaluate(args):
                 comp_anomaly_score+= comp_anomaly_scores[0]
                 norm_comp_anomaly_score+=comp_anomaly_scores[1]
                 patch_anomaly_score+=patch_anomaly_scores[1]
+                norm_patch_anomaly_score+=patch_anomaly_scores[2]
+
+                combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[2] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
+                if atype == 'good':
+                    good_scores.append(combined_score)
+
+                all_labels.extend(labels.cpu().numpy())
+                all_combined_scores.append(combined_score)
+                all_patch_maps.append(patch_anomaly_scores[0].cpu().numpy())
+                all_gt_masks.append(batch['mask'].to(device).cpu().numpy())
 
                 if viz_count < max_viz_samples:
                     #only visualize up to a max viz samples variable so that we're not flooding disk space for no reason
@@ -139,9 +161,21 @@ def evaluate(args):
             avg_patch_score = patch_anomaly_score / len(loader)
             norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
             norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
+            norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
+            avg_combined_score = np.mean(all_combined_scores)
+            avg_good_score = np.mean(good_scores)
+
+            metrics = compute_metrics(gt_labels=np.array(all_labels), scores=np.array(all_combined_scores), gt_maps=np.array(all_gt_masks), pred_maps=np.array(all_patch_maps))
 
             print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
-            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
+            print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f} | combined score = {avg_combined_score:.4f}")
+            print(f"\n--- Results for {atype} ---")
+            if atype == "good":
+                print(f"Average anomaly score (surrogate FPR (Lower is better)): {avg_good_score:.4f}")
+            else:
+                for metric_name, value in metrics.items():
+                    print(f"{metric_name}: {value:.4f}")
+            print("--------------------------\n")
 
 
 if __name__ == "__main__":
