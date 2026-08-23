@@ -184,8 +184,8 @@ def evaluate(args):
 
         #convert it to normal floats because if we don't json might get upset because it's gotta be serialized in a weird way or something
         serializable_metrics = {}
-        for atype, metrics_dict in all_metrics.items():
-            serializable_metrics[atype] = {k: float(v) for k, v in metrics_dict.items()}
+        for metric_name, value in metrics.items():
+            serializable_metrics[metric_name] = value
 
         with open(metrics_save_path, 'w') as f:
             json.dump(serializable_metrics, f, indent=4)
