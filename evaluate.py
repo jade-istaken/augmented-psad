@@ -215,4 +215,4 @@ if __name__ == "__main__":
     # breakfast_box = 7
     # juice_bottle = 9
     # pushpins = 26
-    # splicing_connectors = 10
+    # splicing_connectors = 14
