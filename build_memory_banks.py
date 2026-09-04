@@ -45,7 +45,8 @@ def build_banks(args):
         num_neighbors=args.num_neighbors,
         sampling_ratio=args.sampling_ratio,
         target_image_size=(512,512),
-        fast_dev_mode=args.random_patches
+        fast_dev_mode=args.random_patches,
+        pre_filter_ratio=args.pre_filter_ratio
     )
     scaler = AdaptiveScaler()
 
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--num_neighbors", type=int, default=9)
     parser.add_argument("--sampling_ratio", type=float, default=0.1)
+    parser.add_argument("--pre_filter_ratio", type=float, default=1.0)
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
     parser.add_argument("--random_patches", type=bool, default=False, help="Whether to use random sampling to speed up patchcore building")
 
@@ -148,4 +150,4 @@ if __name__ == "__main__":
     #breakfast_box = 7
     #juice_bottle = 9
     #pushpins = 26
-    #splicing_connectors = 10
+    #splicing_connectors = 14

@@ -56,10 +56,20 @@ class SparseRandomProjection(nn.Module):
 
 class KCenterGreedy:
     #coreset subsampling algorithm for selection of normal patches
-    def __init__(self, embedding: torch.Tensor, sampling_ratio: float):
-        self.embedding = embedding.detach()
+    def __init__(self, embedding: torch.Tensor, sampling_ratio: float, pre_filter_ratio: float = 1.0):
         self.sampling_ratio = sampling_ratio
-        self.num_samples = int(len(self.embedding) * sampling_ratio)
+        self.num_samples = int(len(embedding) * sampling_ratio)
+        if 0.0 < pre_filter_ratio < 1.0:
+            num_pre_filtered = int(len(embedding) * pre_filter_ratio)
+            # Ensure we have at least enough points to satisfy the sampling_ratio requirement
+            num_pre_filtered = max(num_pre_filtered, self.num_samples + 1)
+            num_pre_filtered = min(num_pre_filtered, len(embedding))
+
+            indices = torch.randperm(len(embedding))[:num_pre_filtered]
+            self.embedding = embedding[indices].detach()
+            print(f"Random pre-filter applied: reduced embeddings from {len(embedding)} to {len(self.embedding)}")
+        else:
+            self.embedding = embedding.detach()
         self.projection = SparseRandomProjection(epsilon=0.9)
 
         self.features: torch.Tensor | None = None
@@ -122,7 +132,8 @@ class PatchMemoryBank(nn.Module):
                  sampling_ratio = 0.1,
                  target_image_size = (256,256),
                  fast_dev_mode: bool = False,
-                 batch_size: int = 10000):
+                 batch_size: int = 10000,
+                 pre_filter_ratio: float = 1.0):
         super().__init__()
         self.num_neighbors = num_neighbors
         self.sampling_ratio = sampling_ratio
@@ -130,6 +141,7 @@ class PatchMemoryBank(nn.Module):
         self.blur = GaussianBlur2d(kernel_size=33, sigma=4.0)
         self.batch_size = batch_size
         self.fast_dev_mode = fast_dev_mode
+        self.pre_filter_ratio = pre_filter_ratio
 
         # self.memory_bank: torch.Tensor | None = None
         # self.mean: torch.Tensor | None = None
@@ -148,15 +160,15 @@ class PatchMemoryBank(nn.Module):
                 self.memory_bank = self._random_subsample(embeddings, self.sampling_ratio)
             else:
                 print("Beginning coreset subsampling")
-                self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio)
+                self.memory_bank = self._coreset_subsample(embeddings, self.sampling_ratio, self.pre_filter_ratio)
         else:
             self.memory_bank = embeddings.clone()
 
         self._standardize_memory_bank()
         print(f"Patch memory bank built with {self.memory_bank.shape[0]} patches")
 
-    def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float):
-        sampler = KCenterGreedy(embedding=embeddings, sampling_ratio=sampling_ratio)
+    def _coreset_subsample(self, embeddings: torch.Tensor, sampling_ratio: float, pre_filter_ratio: float):
+        sampler = KCenterGreedy(embedding=embeddings, sampling_ratio=sampling_ratio, pre_filter_ratio= pre_filter_ratio)
         return sampler.sample_coreset()
 
     def _random_subsample(self, embeddings: torch.Tensor, sampling_ratio: float) -> torch.Tensor:
