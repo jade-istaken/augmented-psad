@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data._utils import pin_memory
+import albumentations as A
 
 
 class MVTecLOCODataset(Dataset):
@@ -29,6 +29,15 @@ class MVTecLOCODataset(Dataset):
         self.images: List[Path] = []
         self.masks: List[Path] = []
         self.labels: List[int] = [] #0 is normal, 1 is anomalous
+
+        self.aug = A.Compose([
+            A.Posterize(p=0.2),
+            A.Equalize(p=0.2),
+            A.Sharpen(p=0.2),
+            A.RandomBrightnessContrast(p=0.2),
+            A.Solarize(p=0.2),
+            A.ColorJitter(p=0.2),
+        ])
 
         self._load_file_lists()
 
@@ -105,9 +114,16 @@ class MVTecLOCODataset(Dataset):
             -label: 0 or 1 for normal or anomalous respectively
             -coord: the coordinate grid tensor of shape [2, H, W]
         """
-
+        # hflip_probability = np.random.rand()
+        # vflip_probability = np.random.rand()
         image = Image.open(self.images[idx]).convert('RGB')
         image = image.resize(self.image_size, Image.Resampling.BILINEAR) #shouldn't need to resize because they're preprocessed but it's a safety step
+        image = np.array(image)
+        image = self.aug(image=image)['image']
+        # if hflip_probability <= 0.5: #50% chance of flipping vertically and horizontall (independent)
+        #     image = np.flip(image, axis=1).copy()
+        # if vflip_probability<= 0.5:
+        #     image = np.flip(image, axis=0).copy()
         image_tensor = torch.from_numpy(np.array(image)).permute(2,0,1).float()
         _, H, W = image_tensor.shape
 
@@ -117,6 +133,11 @@ class MVTecLOCODataset(Dataset):
             if self.masks[idx] is not None and self.masks[idx].exists():
                 mask = Image.open(self.masks[idx])
                 mask = mask.resize(self.image_size, Image.Resampling.NEAREST)
+                mask = np.array(mask)
+                # if hflip_probability <= 0.5:  # 50% chance of flipping vertically and horizontall (independent)
+                #     mask = np.flip(mask, axis=1).copy()
+                # if vflip_probability <= 0.5:
+                #     mask = np.flip(mask, axis=0).copy()
                 mask_tensor = torch.from_numpy(np.array(mask)).long()
             else:
                 mask_tensor = torch.zeros((H,W))

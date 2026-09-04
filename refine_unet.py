@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
+import torch.nn.functional as F
 from pathlib import Path
 import argparse
 import numpy as np
@@ -107,6 +108,23 @@ class PseudoLabelDataset(Dataset):
         sample['mask'] = self.pseudo_masks[idx]
         return sample
 
+def dice_score(pred: torch.Tensor, ground_truth: torch.Tensor):
+    ground_truth = ground_truth.unsqueeze(1)
+    new_gt = torch.zeros_like(ground_truth).repeat(1, pred.shape[1], 1, 1).long()
+    new_gt = new_gt.scatter(1, ground_truth, 1).float()
+
+    dice = (2 * (pred * new_gt).sum((2,3))) / (pred.sum((2,3)) + new_gt.sum((2,3)) + 1e-8)
+    return dice.mean((0,1))
+
+def class_proportion_loss(pred: torch.Tensor, ground_truth: torch.Tensor):
+    ground_truth = ground_truth.unsqueeze(1)
+    new_gt = torch.zeros_like(ground_truth).repeat(1, pred.shape[1], 1, 1).long()
+    new_gt = new_gt.scatter(1, ground_truth, 1).float()
+
+    difference = torch.abs(new_gt.mean((2,3)) - pred.mean((2,3)))
+    loss = difference[:,1:].sum() #we can exclude the background because there's no need to care about it
+    return loss
+
 def train_phase_two(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data_manager = MVTecLOCODataLoader(
@@ -153,7 +171,11 @@ def train_phase_two(args):
             masks = batch['mask'].to(device)
 
             logits = phase2_model(imgs, coords)
-            loss = ce_loss(logits, masks)
+            activated_logits = F.softmax(logits, dim=1)
+            cross_ent_loss = ce_loss(logits, masks)
+            dice_loss = 1-dice_score(activated_logits, masks)
+            proportion_loss = class_proportion_loss(activated_logits, masks)
+            loss = cross_ent_loss + dice_loss + proportion_loss
 
             loss.backward()
             optimizer.step()
