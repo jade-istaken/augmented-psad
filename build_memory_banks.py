@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--sampling_ratio", type=float, default=0.1)
     parser.add_argument("--pre_filter_ratio", type=float, default=1.0)
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
-    parser.add_argument("--random_patches", type=bool, default=False, help="Whether to use random sampling to speed up patchcore building")
+    parser.add_argument("--random_patches", action='store_true', default=False, help="Whether to use random sampling to speed up patchcore building")
 
     args = parser.parse_args()
     build_banks(args)
