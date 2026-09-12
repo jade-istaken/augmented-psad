@@ -119,7 +119,7 @@ class MVTecLOCODataset(Dataset):
         image = Image.open(self.images[idx]).convert('RGB')
         image = image.resize(self.image_size, Image.Resampling.BILINEAR) #shouldn't need to resize because they're preprocessed but it's a safety step
         image = np.array(image)
-        image = self.aug(image=image)['image']
+        if self.split == 'train': image = self.aug(image=image)['image']
         # if hflip_probability <= 0.5: #50% chance of flipping vertically and horizontall (independent)
         #     image = np.flip(image, axis=1).copy()
         # if vflip_probability<= 0.5:
