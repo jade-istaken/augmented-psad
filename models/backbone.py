@@ -1,15 +1,18 @@
 import torch
 import torch.nn as nn
 from torchvision.models import wide_resnet101_2, Wide_ResNet101_2_Weights
+import clip
 
 def init_backbone() -> nn.Module:
-    #initializes the resnet backbone with pre-trained imagenet weights
-    weights = Wide_ResNet101_2_Weights.IMAGENET1K_V2
-    model = wide_resnet101_2(weights=weights)
+    #initializes the CLIP backbone with pre-trained weights
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, _ = clip.load('RN101', device=device)
 
-    for param in model.parameters():
-        param.requires_grad = False #freeze the weights to preserve imagenet performance
+    visual_encoder = model.visual
 
-    model.eval() # set to eval mode in order to disable updating
+    for param in visual_encoder.parameters():
+        param.requires_grad = False #freeze the weights to preserve CLIP performance
+
+    visual_encoder.eval() # set to eval mode in order to disable updating
 
     return model
