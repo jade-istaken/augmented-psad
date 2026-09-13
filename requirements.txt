@@ -20,8 +20,8 @@ mpmath==1.3.0
 narwhals==2.24.0
 networkx==3.6.1
 numkong==7.8.2
-numpy==2.5.1
-numpy-typing-compat==20260602.2.5
+numpy>=2.0.0
+numpy-typing-compat
 nvidia-cublas==13.1.1.3
 nvidia-cuda-cupti==13.0.85
 nvidia-cuda-nvrtc==13.0.88
@@ -38,7 +38,7 @@ nvidia-nvjitlink==13.3.33
 nvidia-nvshmem-cu13==3.4.5
 nvidia-nvtx==13.0.85
 opencv-python-headless==5.0.0.93
-optype==0.18.0
+optype>=0.15.0
 packaging==26.3
 pillow==12.3.0
 pydantic==2.13.5
@@ -48,8 +48,8 @@ python-dateutil==2.9.0.post0
 PyYAML==6.0.3
 regex==2026.9.10
 scikit-learn==1.9.0
-scipy==1.18.0
-scipy-stubs==1.18.0.1
+scipy>=1.17.0
+scipy-stubs>=1.17.0.1
 setuptools==83.0.0
 six==1.17.0
 stringzilla==5.1.2
