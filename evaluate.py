@@ -66,7 +66,7 @@ def evaluate(args):
 
     # initialize and load saved memory banks
     bank_save_dir = Path(args.save_dir) / args.category
-    memory_bank_states = torch.load(bank_save_dir / 'memory_banks.pth')
+    memory_bank_states = torch.load(bank_save_dir / 'memory_banks.pth', weights_only=False)
 
     hist_state = memory_bank_states['hist_bank']
     hist_bank = HistogramMemoryBank(num_classes=args.num_classes)
