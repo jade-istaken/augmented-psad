@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 from torch.nn.functional import bilinear
 from torchvision.models import Wide_ResNet101_2_Weights, wide_resnet101_2
+from models import init_backbone
 
 
 class Segmenter(nn.Module):
@@ -14,6 +15,10 @@ class Segmenter(nn.Module):
 
         weights = Wide_ResNet101_2_Weights.IMAGENET1K_V2 if pretrained else None
         self.encoder = wide_resnet101_2(weights=weights)
+
+        if pretrained:
+            for param in self.encoder.parameters():
+                param.requires_grad = False  # freeze the weights to preserve IMAGENET1k performance
 
         bottleneck_in_ch = 1024 + (2 if use_coord else 0) #add 2 extra channels for coordinates if necessary
 
