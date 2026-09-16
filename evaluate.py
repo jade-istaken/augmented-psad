@@ -137,7 +137,7 @@ def evaluate(args):
         good_scores = [] #because doing normal metrics on the good subset is kind of meaningless
         #by having these outside the loop, data from all datasets is accumalted, essentailly turning the 3 datasets into one single mixed dataset
         with torch.no_grad():
-            for atype in test_loaders:  # iterate through the test loaders one by one
+            for atype in loaders_to_test:  # iterate through the test loaders one by one
 
                 loader = test_loaders[atype]
                 viz_count = 0
