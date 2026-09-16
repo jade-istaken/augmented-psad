@@ -158,7 +158,7 @@ def evaluate(args):
                     patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
 
 
-                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[1] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
+                    combined_score = (comp_anomaly_scores[1] + patch_anomaly_scores[1] + hist_anomaly_scores[1] ) / 3
                     if atype == 'good':
                         good_scores.append(combined_score)
 
