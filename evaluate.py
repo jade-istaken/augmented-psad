@@ -141,15 +141,15 @@ def evaluate(args):
                     comp_anomaly_score+= comp_anomaly_scores[0]
                     norm_comp_anomaly_score+=comp_anomaly_scores[1]
                     patch_anomaly_score+=patch_anomaly_scores[1]
-                    norm_patch_anomaly_score+=patch_anomaly_scores[2]
+                    norm_patch_anomaly_score+=patch_anomaly_scores[1]
 
-                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[2] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
+                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[1] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
                     if atype == 'good':
                         good_scores.append(combined_score)
 
                     all_labels.extend(labels.cpu().numpy())
                     all_combined_scores.append(combined_score)
-                    all_patch_maps.append(patch_anomaly_scores[0].cpu().numpy())
+                    all_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
                     all_gt_masks.append(batch['mask'].to(device).cpu().numpy())
 
                     if viz_count < max_viz_samples:
@@ -157,16 +157,16 @@ def evaluate(args):
                         orig_img = imgs[0].cpu()
 
                         save_path = viz_dir / f"{atype}_sample_{batch_idx}.png"
-                        visualize_anomaly_map(orig_img, patch_anomaly_scores[0], save_path)
+                        visualize_anomaly_map(orig_img, patch_anomaly_scores[2], save_path)
                         viz_count += 1
 
-            avg_hist_score = hist_anomaly_score / len(loader)
-            avg_comp_score = comp_anomaly_score / len(loader)
-            avg_patch_score = patch_anomaly_score / len(loader)
-            norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
-            norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
-            norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
-            avg_combined_score = np.mean(all_combined_scores)
+            # avg_hist_score = hist_anomaly_score / len(loader)
+            # avg_comp_score = comp_anomaly_score / len(loader)
+            # avg_patch_score = patch_anomaly_score / len(loader)
+            # norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
+            # norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
+            # norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
+            # avg_combined_score = np.mean(all_combined_scores)
             avg_good_score = np.mean(good_scores)
 
             metrics = compute_metrics(gt_labels=np.array(all_labels), scores=np.array(all_combined_scores), gt_maps=np.array(all_gt_masks), pred_maps=np.array(all_patch_maps))
@@ -232,14 +232,14 @@ def evaluate(args):
                     norm_hist_anomaly_score += hist_anomaly_scores[1]
                     comp_anomaly_score += comp_anomaly_scores[0]
                     norm_comp_anomaly_score += comp_anomaly_scores[1]
-                    patch_anomaly_score += patch_anomaly_scores[1]
-                    norm_patch_anomaly_score += patch_anomaly_scores[2]
+                    patch_anomaly_score += patch_anomaly_scores[0]
+                    norm_patch_anomaly_score += patch_anomaly_scores[1]
 
-                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[2] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
+                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[1] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
 
                     sa_labels.extend(labels.cpu().numpy())
                     sa_combined_scores.append(combined_score)
-                    sa_patch_maps.append(patch_anomaly_scores[0].cpu().numpy())
+                    sa_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
                     sa_gt_masks.append(batch['mask'].to(device).cpu().numpy())
 
             sa_metrics = compute_metrics(gt_labels=np.array(sa_labels), scores=np.array(sa_combined_scores), gt_maps=np.array(sa_gt_masks), pred_maps=np.array(sa_patch_maps))
@@ -288,17 +288,17 @@ def evaluate(args):
                     norm_hist_anomaly_score += hist_anomaly_scores[1]
                     comp_anomaly_score += comp_anomaly_scores[0]
                     norm_comp_anomaly_score += comp_anomaly_scores[1]
-                    patch_anomaly_score += patch_anomaly_scores[1]
-                    norm_patch_anomaly_score += patch_anomaly_scores[2]
+                    patch_anomaly_score += patch_anomaly_scores[0]
+                    norm_patch_anomaly_score += patch_anomaly_scores[1]
 
                     combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() +
-                                      patch_anomaly_scores[2] / patch_bank.max_train_distance.item() +
+                                      patch_anomaly_scores[1] / patch_bank.max_train_distance.item() +
                                       hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (
                                                  1 / comp_bank.max_train_distance.item() + 1 / patch_bank.max_train_distance.item() + 1 / hist_bank.max_train_distance.item())
 
                     la_labels.extend(labels.cpu().numpy())
                     la_combined_scores.append(combined_score)
-                    la_patch_maps.append(patch_anomaly_scores[0].cpu().numpy())
+                    la_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
                     la_gt_masks.append(batch['mask'].to(device).cpu().numpy())
 
             la_metrics = compute_metrics(gt_labels=np.array(la_labels), scores=np.array(la_combined_scores),
@@ -333,6 +333,7 @@ if __name__ == "__main__":
                         help="Number of neighbors for patchcore, should match number used during memory bank construction")
     parser.add_argument("--sampling_ratio", type=float, default=0.1)
     parser.add_argument("--split_metrics", action="store_true", default=False, help="Whether to record metrics across SA and LA separately")
+    parser.add_argument("--ablation", action="store_true", default=False, help="Flag to perform ablation study to determine memory bank contributions")
 
     args = parser.parse_args()
     evaluate(args)
