@@ -14,7 +14,7 @@ class FeatureExtractor(nn.Module):
 
     def _register_hooks(self):
         #registers all the forward hooks in the layers_to_extract list
-        for name, module in self.backbone.named_modules():
+        for name, module in self.backbone.named_modules(remove_duplicate=False):
             if name in self.layers_to_extract:
                 module.register_forward_hook(self._make_hook(name))
 
@@ -59,4 +59,4 @@ class FeatureExtractor(nn.Module):
         #apply L2 normalization across the channel dimension
         normalized_features = functional.normalize(processed_features, p=2, dim=1)
 
-        return normalized_features
+        return normalized_features.float()
