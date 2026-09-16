@@ -101,8 +101,35 @@ def evaluate(args):
     viz_dir.mkdir(parents=True, exist_ok=True)
     max_viz_samples = 5
 
+    #doing this by using configurations instead of repeating code and using if/else branches makes the entire thing much more maintainable
+    if args.split_metrics:
+        eval_configs = [
+            {
+                'name': 'Structural Anomalies',
+                'loaders': ['good', 'structural_anomalies'],
+                'file_prefix': 'sa_'
+            },
+            {
+                'name': 'Logical Anomalies',
+                'loaders': ['good', 'logical_anomalies'],
+                'file_prefix': 'la_'
+            }
+        ]
+    else:
+        eval_configs = [
+            {
+                'name': 'Aggregate Dataset',
+                'loaders': list(test_loaders.keys()),
+                'file_prefix': ''
+            }
+        ]
+
     print("Beginning test runs")
-    if not args.split_metrics:
+    for config in eval_configs:
+        group_name = config['name']
+        loaders_to_test = config['loaders']
+        file_prefix = config['file_prefix']
+
         all_labels = []
         all_combined_scores = []
         all_patch_maps = []
@@ -113,12 +140,6 @@ def evaluate(args):
             for atype in test_loaders:  # iterate through the test loaders one by one
 
                 loader = test_loaders[atype]
-                hist_anomaly_score = 0.0
-                norm_hist_anomaly_score = 0.0
-                comp_anomaly_score = 0.0
-                norm_comp_anomaly_score = 0.0
-                patch_anomaly_score = 0.0
-                norm_patch_anomaly_score = 0.0
                 viz_count = 0
 
                 for batch_idx, batch in enumerate(tqdm(loader, desc=f"Testing {atype}")):
@@ -136,12 +157,6 @@ def evaluate(args):
                     flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
                     patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
 
-                    hist_anomaly_score+= hist_anomaly_scores[0]
-                    norm_hist_anomaly_score+=hist_anomaly_scores[1]
-                    comp_anomaly_score+= comp_anomaly_scores[0]
-                    norm_comp_anomaly_score+=comp_anomaly_scores[1]
-                    patch_anomaly_score+=patch_anomaly_scores[1]
-                    norm_patch_anomaly_score+=patch_anomaly_scores[1]
 
                     combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[1] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
                     if atype == 'good':
@@ -160,26 +175,20 @@ def evaluate(args):
                         visualize_anomaly_map(orig_img, patch_anomaly_scores[2], save_path)
                         viz_count += 1
 
-            # avg_hist_score = hist_anomaly_score / len(loader)
-            # avg_comp_score = comp_anomaly_score / len(loader)
-            # avg_patch_score = patch_anomaly_score / len(loader)
-            # norm_avg_hist_score = norm_hist_anomaly_score / len(loader)
-            # norm_avg_comp_score = norm_comp_anomaly_score / len(loader)
-            # norm_avg_patch_score = norm_patch_anomaly_score / len(loader)
-            # avg_combined_score = np.mean(all_combined_scores)
+
             avg_good_score = np.mean(good_scores)
 
             metrics = compute_metrics(gt_labels=np.array(all_labels), scores=np.array(all_combined_scores), gt_maps=np.array(all_gt_masks), pred_maps=np.array(all_patch_maps))
 
             # print(f"Average {atype} raw anomaly scores: hist={avg_hist_score:.4f} | comp={avg_comp_score:.4f} | patch={avg_patch_score:.4f}")
             # print(f"Average {atype} normalized anomaly scores: hist={norm_avg_hist_score:.4f} | comp={norm_avg_comp_score:.4f} | patch={norm_avg_patch_score:.4f} | combined score = {avg_combined_score:.4f}")
-            print(f"\n--- Results Across whole dataset ---")
+            print(f"\n--- Results Across {group_name} ---")
             print(f"Average anomaly score across only good results (surrogate FPR (Lower is better)): {avg_good_score:.4f}")
             for metric_name, value in metrics.items():
                 print(f"{metric_name}: {value:.4f}")
             print("--------------------------\n")
 
-            metrics_save_path = bank_save_dir / 'evaluation_metrics.json'
+            metrics_save_path = bank_save_dir / f'{file_prefix}evaluation_metrics.json'
 
             #convert it to normal floats because if we don't json might get upset because it's gotta be serialized in a weird way or something
             serializable_metrics = {}
@@ -191,132 +200,6 @@ def evaluate(args):
 
             print(f"Successfully saved evaluation metrics to {metrics_save_path}")
 
-    else:
-        sa_labels = []
-        sa_combined_scores = []
-        sa_patch_maps = []
-        sa_gt_masks = []
-
-        la_labels = []
-        la_combined_scores = []
-        la_patch_maps = []
-        la_gt_masks = []
-
-        print("Beginning Structural Anomaly tests")
-        with torch.no_grad():
-            for atype in ['good', 'structural_anomalies']:
-                loader = test_loaders[atype]
-                hist_anomaly_score = 0.0
-                norm_hist_anomaly_score = 0.0
-                comp_anomaly_score = 0.0
-                norm_comp_anomaly_score = 0.0
-                patch_anomaly_score = 0.0
-                norm_patch_anomaly_score = 0.0
-
-                for batch_idx, batch in enumerate(tqdm(loader,desc = f"Testing {atype}")):
-                    imgs = batch['image'].to(device)
-                    coords = batch['coord'].to(device)
-                    labels = batch['label'].to(device)
-
-                    seg_logits = seg_model(imgs, coords)
-                    seg_masks = torch.argmax(seg_logits, dim=1)
-                    features = feature_extractor(imgs)
-                    B, C, H, W = features.shape
-
-                    hist_anomaly_scores = hist_bank.score(seg_masks)
-                    comp_anomaly_scores = comp_bank.score(features, seg_masks)
-                    flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
-                    patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
-
-                    hist_anomaly_score += hist_anomaly_scores[0]
-                    norm_hist_anomaly_score += hist_anomaly_scores[1]
-                    comp_anomaly_score += comp_anomaly_scores[0]
-                    norm_comp_anomaly_score += comp_anomaly_scores[1]
-                    patch_anomaly_score += patch_anomaly_scores[0]
-                    norm_patch_anomaly_score += patch_anomaly_scores[1]
-
-                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() + patch_anomaly_scores[1] / patch_bank.max_train_distance.item() + hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (1/comp_bank.max_train_distance.item() + 1/patch_bank.max_train_distance.item() + 1/hist_bank.max_train_distance.item())
-
-                    sa_labels.extend(labels.cpu().numpy())
-                    sa_combined_scores.append(combined_score)
-                    sa_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
-                    sa_gt_masks.append(batch['mask'].to(device).cpu().numpy())
-
-            sa_metrics = compute_metrics(gt_labels=np.array(sa_labels), scores=np.array(sa_combined_scores), gt_maps=np.array(sa_gt_masks), pred_maps=np.array(sa_patch_maps))
-            print(f"\n--- Results Across Structural Anomalies ---")
-            for metric_name, value in sa_metrics.items():
-                print(f"{metric_name}: {value:.4f}")
-            print("--------------------------\n")
-
-            sa_metrics_save_path = bank_save_dir / 'sa_evaluation_metrics.json'
-            serializable_sa_metrics = {}
-            for metric_name, value in sa_metrics.items():
-                serializable_sa_metrics[metric_name] = value
-
-            with open(sa_metrics_save_path, 'w') as f:
-                json.dump(serializable_sa_metrics, f, indent=4)
-
-            print(f"Successfully saved evaluation metrics to {sa_metrics_save_path}")
-
-        print("Beginning Logical Anomaly tests")
-        with torch.no_grad():
-            for atype in ['good', 'logical_anomalies']:
-                loader = test_loaders[atype]
-                hist_anomaly_score = 0.0
-                norm_hist_anomaly_score = 0.0
-                comp_anomaly_score = 0.0
-                norm_comp_anomaly_score = 0.0
-                patch_anomaly_score = 0.0
-                norm_patch_anomaly_score = 0.0
-
-                for batch_idx, batch in enumerate(tqdm(loader, desc=f"Testing {atype}")):
-                    imgs = batch['image'].to(device)
-                    coords = batch['coord'].to(device)
-                    labels = batch['label'].to(device)
-
-                    seg_logits = seg_model(imgs, coords)
-                    seg_masks = torch.argmax(seg_logits, dim=1)
-                    features = feature_extractor(imgs)
-                    B, C, H, W = features.shape
-
-                    hist_anomaly_scores = hist_bank.score(seg_masks)
-                    comp_anomaly_scores = comp_bank.score(features, seg_masks)
-                    flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
-                    patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
-
-                    hist_anomaly_score += hist_anomaly_scores[0]
-                    norm_hist_anomaly_score += hist_anomaly_scores[1]
-                    comp_anomaly_score += comp_anomaly_scores[0]
-                    norm_comp_anomaly_score += comp_anomaly_scores[1]
-                    patch_anomaly_score += patch_anomaly_scores[0]
-                    norm_patch_anomaly_score += patch_anomaly_scores[1]
-
-                    combined_score = (comp_anomaly_scores[1] / comp_bank.max_train_distance.item() +
-                                      patch_anomaly_scores[1] / patch_bank.max_train_distance.item() +
-                                      hist_anomaly_scores[1] / hist_bank.max_train_distance.item()) / (
-                                                 1 / comp_bank.max_train_distance.item() + 1 / patch_bank.max_train_distance.item() + 1 / hist_bank.max_train_distance.item())
-
-                    la_labels.extend(labels.cpu().numpy())
-                    la_combined_scores.append(combined_score)
-                    la_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
-                    la_gt_masks.append(batch['mask'].to(device).cpu().numpy())
-
-            la_metrics = compute_metrics(gt_labels=np.array(la_labels), scores=np.array(la_combined_scores),
-                                         gt_maps=np.array(la_gt_masks), pred_maps=np.array(la_patch_maps))
-            print(f"\n--- Results Across Logical Anomalies ---")
-            for metric_name, value in la_metrics.items():
-                print(f"{metric_name}: {value:.4f}")
-            print("--------------------------\n")
-
-            la_metrics_save_path = bank_save_dir / 'la_evaluation_metrics.json'
-            serializable_la_metrics = {}
-            for metric_name, value in la_metrics.items():
-                serializable_la_metrics[metric_name] = value
-
-            with open(la_metrics_save_path, 'w') as f:
-                json.dump(serializable_la_metrics, f, indent=4)
-
-            print(f"Successfully saved evaluation metrics to {la_metrics_save_path}")
 
 
 if __name__ == "__main__":
