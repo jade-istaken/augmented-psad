@@ -4,7 +4,7 @@ import torch.nn.functional as functional
 from torch.nn.functional import bilinear
 from torchvision.models import Wide_ResNet101_2_Weights, wide_resnet101_2
 from models import init_backbone
-
+import clip
 
 class Segmenter(nn.Module):
     # use a wideresnet101 backbone and inject coordinate features at the bottleneck
@@ -12,13 +12,14 @@ class Segmenter(nn.Module):
     def __init__(self, num_classes, use_coord = True, pretrained = True):
         super().__init__()
         self.use_coord = use_coord
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        weights = Wide_ResNet101_2_Weights.IMAGENET1K_V2 if pretrained else None
-        self.encoder = wide_resnet101_2(weights=weights)
+        clip_model, _ = clip.load("RN101", device=device)
+        self.encoder = clip_model.visual
+        self.encoder = self.encoder.float()
 
-        if pretrained:
-            for param in self.encoder.parameters():
-                param.requires_grad = False  # freeze the weights to preserve IMAGENET1k performance
+        for param in self.encoder.parameters():
+            param.requires_grad = False
 
         bottleneck_in_ch = 1024 + (2 if use_coord else 0) #add 2 extra channels for coordinates if necessary
 
@@ -29,10 +30,12 @@ class Segmenter(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, in_tensor: torch.Tensor, coord: torch.Tensor = None):
-        out = self.encoder.conv1(in_tensor)
-        out = self.encoder.bn1(out)
-        out = self.encoder.relu(out)
-        out = self.encoder.maxpool(out)
+        x = in_tensor.float()
+
+        out = self.encoder.relu1(self.encoder.bn1(self.encoder.conv1(x)))
+        out = self.encoder.relu2(self.encoder.bn2(self.encoder.conv2(out)))
+        out = self.encoder.relu3(self.encoder.bn3(self.encoder.conv3(out)))
+        out = self.encoder.avgpool(out)
 
         features_0 = self.encoder.layer1(out) # skip connection 1 (high res)
         features_1 = self.encoder.layer2(features_0) #skip connection 2 (mid res)
