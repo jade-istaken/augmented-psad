@@ -124,11 +124,40 @@ def evaluate(args):
             }
         ]
 
+    if args.ablation:
+        ablation_configs = [
+            #these are all the subsets of the memory banks, including the full set for baseline comparison
+            {'name': 'full', 'banks': ['hist', 'comp', 'patch']},
+            {'name': 'no_patch', 'banks': ['hist', 'comp']},
+            {'name': 'no_comp', 'banks': ['hist', 'patch']},
+            {'name': 'no_hist', 'banks': ['comp', 'patch']},
+            {'name': 'hist_only', 'banks': ['hist']},
+            {'name': 'comp_only', 'banks': ['comp']},
+            {'name': 'patch_only', 'banks': ['patch']}
+        ]
+    else:
+        ablation_configs = [
+            {'name': 'full', 'banks': ['hist', 'comp', 'patch']}
+        ]
+
+    #we combine the eval_configs and the ablation configs here to get the full config list
+    run_configs = []
+    for eval_cfg in eval_configs:
+        for abl_cfg in ablation_configs:
+            prefix = f"{eval_cfg['file_prefix']}{abl_cfg['name']}_" if args.ablation else eval_cfg['file_prefix']
+            run_configs.append({
+                'group_name': f"{eval_cfg['name']} - {abl_cfg['name']}",
+                'loaders': eval_cfg['loaders'],
+                'file_prefix':prefix,
+                'active_banks' : abl_cfg['banks']
+            })
+
     print("Beginning test runs")
-    for config in eval_configs:
-        group_name = config['name']
+    for config in run_configs:
+        group_name = config['group_name']
         loaders_to_test = config['loaders']
         file_prefix = config['file_prefix']
+        active_banks = config['active_banks']
 
         all_labels = []
         all_combined_scores = []
@@ -152,19 +181,32 @@ def evaluate(args):
                     features = feature_extractor(imgs)
                     B, C, H, W = features.shape
 
-                    hist_anomaly_scores = hist_bank.score(seg_masks)
-                    comp_anomaly_scores = comp_bank.score(features, seg_masks)
-                    flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
-                    patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
+                    active_scores = [] #list to store scores from the active banks so that we can average them easier style
+
+                    if 'hist' in active_banks:
+                        hist_anomaly_scores = hist_bank.score(seg_masks)
+                        active_scores.append(hist_anomaly_scores[1])
+
+                    if 'comp' in active_banks:
+                        comp_anomaly_scores = comp_bank.score(features, seg_masks)
+                        active_scores.append(comp_anomaly_scores[1])
+
+                    if 'patch' in active_banks:
+                        flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
+                        patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
+                        current_patch_map = patch_anomaly_scores[2]
+                        active_scores.append(patch_anomaly_scores[1])
+                    else:
+                        current_patch_map = torch.zeros((512,512), device=device)
 
 
-                    combined_score = (comp_anomaly_scores[1] + patch_anomaly_scores[1] + hist_anomaly_scores[1] ) / 3
+                    combined_score = sum(active_scores) / len(active_scores)
                     if atype == 'good':
                         good_scores.append(combined_score)
 
                     all_labels.extend(labels.cpu().numpy())
                     all_combined_scores.append(combined_score)
-                    all_patch_maps.append(patch_anomaly_scores[2].cpu().numpy())
+                    all_patch_maps.append(current_patch_map.cpu().numpy())
                     all_gt_masks.append(batch['mask'].to(device).cpu().numpy())
 
                     if viz_count < max_viz_samples:
@@ -172,7 +214,7 @@ def evaluate(args):
                         orig_img = imgs[0].cpu()
 
                         save_path = viz_dir / f"{atype}_sample_{batch_idx}.png"
-                        visualize_anomaly_map(orig_img, patch_anomaly_scores[2], save_path)
+                        visualize_anomaly_map(orig_img, current_patch_map, save_path)
                         viz_count += 1
 
 
@@ -193,7 +235,7 @@ def evaluate(args):
             #convert it to normal floats because if we don't json might get upset because it's gotta be serialized in a weird way or something
             serializable_metrics = {}
             for metric_name, value in metrics.items():
-                serializable_metrics[metric_name] = value
+                serializable_metrics[metric_name] = float(value)
 
             with open(metrics_save_path, 'w') as f:
                 json.dump(serializable_metrics, f, indent=4)
