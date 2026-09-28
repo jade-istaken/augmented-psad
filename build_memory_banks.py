@@ -10,6 +10,7 @@ from data.dataset import MVTecLOCODataLoader
 from memory_banks.histogram import HistogramMemoryBank
 from memory_banks.patchcore import PatchMemoryBank
 from memory_banks.composition import CompositionMemoryBank
+from memory_banks.semantic import SemanticMemoryBank
 from utils.scaling import AdaptiveScaler
 
 def build_banks(args):
@@ -41,20 +42,26 @@ def build_banks(args):
         feature_channels = 1792, #for wideresnet-101 layer2 has 768 and layer3 has 1024
         feature_extractor=feature_extractor
     )
-    patch_bank = PatchMemoryBank(
-        num_neighbors=args.num_neighbors,
-        sampling_ratio=args.sampling_ratio,
-        target_image_size=(512,512),
-        fast_dev_mode=args.random_patches,
-        pre_filter_ratio=args.pre_filter_ratio
-    )
+    # patch_bank = PatchMemoryBank(
+    #     num_neighbors=args.num_neighbors,
+    #     sampling_ratio=args.sampling_ratio,
+    #     target_image_size=(512,512),
+    #     fast_dev_mode=args.random_patches,
+    #     pre_filter_ratio=args.pre_filter_ratio
+    # )
+    semantic_bank = SemanticMemoryBank(
+        category=args.category,
+        clip_model_name="ViT-B/32",
+        context_length=16
+    ).to(device)
     scaler = AdaptiveScaler()
 
     #begin collecting the relevant data for the banks
     print("Extracting features and masks from normal training data")
     all_masks = []
     all_composition_features = [] #List[(features)]
-    all_patch_embeddings = []
+    # all_patch_embeddings = []
+    all_images = []
 
     with torch.no_grad():
         for batch in tqdm(train_loader):
@@ -73,9 +80,11 @@ def build_banks(args):
             all_composition_features.append(features_cpu)
 
             #flatten features for patch bank
-            B, C, H, W = features_cpu.shape
-            flat_embeddings = features_cpu.permute(0, 2, 3, 1).reshape(-1, C)
-            all_patch_embeddings.append(flat_embeddings)
+            # B, C, H, W = features_cpu.shape
+            # flat_embeddings = features_cpu.permute(0, 2, 3, 1).reshape(-1, C)
+            # all_patch_embeddings.append(flat_embeddings)
+
+            all_images.append(imgs)
             del imgs, coords, seg_logits, seg_masks, features #explicitly delete these to stop over-caching
 
     #build the banks
@@ -87,9 +96,16 @@ def build_banks(args):
     # concatenate the features
     comp_features = torch.cat(all_composition_features, dim=0)
     del all_composition_features
-    #concatenate patches
-    patch_embeddings = torch.cat(all_patch_embeddings, dim=0)
-    del all_patch_embeddings
+    # #concatenate patches
+    # patch_embeddings = torch.cat(all_patch_embeddings, dim=0)
+    # del all_patch_embeddings
+
+    image_tensor = torch.cat(all_images,dim=0)
+    print("Training learnable prompts")
+    semantic_bank.train_prompts(image_tensor)
+
+    print("Building semantic bank")
+    semantic_bank.build(image_tensor)
 
     #lkets just force garbage collection too
     import gc
@@ -104,23 +120,25 @@ def build_banks(args):
     print("Building composition memory bank")
     comp_bank.build(comp_features, comp_masks)
 
-    print("Building patch memory bank (This will take a while due to coreset subsampling)")
-    patch_bank.build(patch_embeddings)
+    # print("Building patch memory bank (This will take a while due to coreset subsampling)")
+    # patch_bank.build(patch_embeddings)
 
     #Record the adaptive sfcaling statistics into the scaler
     print("Storing the adaptive scaling statistics")
 
     scaler.max_scores['hist'] = hist_bank.max_train_distance
     scaler.max_scores['comp'] = comp_bank.max_train_distance
-    scaler.max_scores['patch'] = patch_bank.max_train_distance
+    # scaler.max_scores['patch'] = patch_bank.max_train_distance
+    scaler.max_scores['semantic'] = semantic_bank.max_train_distance
 
     save_dir = Path(args.save_dir) / args.category
     save_dir.mkdir(parents=True,exist_ok=True)
 
     save_dict = {
-        'patch_bank': patch_bank.state_dict(),
+        # 'patch_bank': patch_bank.state_dict(),
         'hist_bank': hist_bank.state_dict(),
         'comp_bank': comp_bank.state_dict(),
+        "semantic_bank": semantic_bank.state_dict(),
         'scaler': scaler
     }
 
