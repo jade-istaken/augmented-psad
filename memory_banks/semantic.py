@@ -108,7 +108,7 @@ class SemanticMemoryBank(nn.Module):
 
     def _get_text_features(self) -> torch.Tensor:
         #injects learnable context directly into the transformer sequence
-        device = next(self.model.parameters()).device()
+        device = next(self.model.parameters()).device
 
         context = self.learnable_context.unsqueeze(0).to(device)
         prefix = self.prefix_embeddings.unsqueeze(0).to(device)
