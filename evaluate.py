@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from data.dataset import MVTecLOCODataLoader
-from memory_banks import HistogramMemoryBank, PatchMemoryBank, CompositionMemoryBank
+from memory_banks import HistogramMemoryBank, PatchMemoryBank, CompositionMemoryBank, SemanticMemoryBank
 from models import init_backbone, FeatureExtractor, Segmenter
 from utils.metrics import compute_metrics
 
@@ -84,18 +84,25 @@ def evaluate(args):
     comp_bank.load_state_dict(comp_state, strict=False)
     comp_bank.to(device)
 
-    patch_state = memory_bank_states['patch_bank']
-    patch_bank = PatchMemoryBank(
-        num_neighbors=args.num_neighbors,
-        sampling_ratio=args.sampling_ratio,
-        target_image_size=(512, 512)
-    )
-    patch_bank.memory_bank = patch_state.pop('memory_bank')
-    patch_bank.mean = patch_state.pop('mean')
-    patch_bank.std = patch_state.pop('std')
-    patch_bank.max_train_distance = patch_state.pop('max_train_distance')
-    patch_bank.load_state_dict(patch_state, strict=False)
-    patch_bank.to(device)
+    # patch_state = memory_bank_states['patch_bank']
+    # patch_bank = PatchMemoryBank(
+    #     num_neighbors=args.num_neighbors,
+    #     sampling_ratio=args.sampling_ratio,
+    #     target_image_size=(512, 512)
+    # )
+    # patch_bank.memory_bank = patch_state.pop('memory_bank')
+    # patch_bank.mean = patch_state.pop('mean')
+    # patch_bank.std = patch_state.pop('std')
+    # patch_bank.max_train_distance = patch_state.pop('max_train_distance')
+    # patch_bank.load_state_dict(patch_state, strict=False)
+    # patch_bank.to(device)
+
+    semantic_state = memory_bank_states['semantic_bank']
+    semantic_bank = SemanticMemoryBank(category=args.category)
+    semantic_bank.memory_bank = semantic_state.pop("memory_bank")
+    semantic_bank.normal_image_embeddings = semantic_state.pop("normal_image_embeddings")
+    semantic_bank.load_state_dict(semantic_state, strict=False)
+    semantic_bank.to(device)
 
     viz_dir = Path(args.save_dir) / args.category
     viz_dir.mkdir(parents=True, exist_ok=True)
@@ -127,17 +134,17 @@ def evaluate(args):
     if args.ablation:
         ablation_configs = [
             #these are all the subsets of the memory banks, including the full set for baseline comparison
-            {'name': 'full', 'banks': ['hist', 'comp', 'patch']},
-            {'name': 'no_patch', 'banks': ['hist', 'comp']},
-            {'name': 'no_comp', 'banks': ['hist', 'patch']},
-            {'name': 'no_hist', 'banks': ['comp', 'patch']},
+            {'name': 'full', 'banks': ['hist', 'comp', 'semantic']},
+            {'name': 'no_semantic', 'banks': ['hist', 'comp']},
+            {'name': 'no_comp', 'banks': ['hist', 'semantic']},
+            {'name': 'no_hist', 'banks': ['comp', 'semantic']},
             {'name': 'hist_only', 'banks': ['hist']},
             {'name': 'comp_only', 'banks': ['comp']},
-            {'name': 'patch_only', 'banks': ['patch']}
+            {'name': 'semantic_only', 'banks': ['semantic']}
         ]
     else:
         ablation_configs = [
-            {'name': 'full', 'banks': ['hist', 'comp', 'patch']}
+            {'name': 'full', 'banks': ['hist', 'comp', 'semantic']}
         ]
 
     #we combine the eval_configs and the ablation configs here to get the full config list
@@ -191,13 +198,17 @@ def evaluate(args):
                         comp_anomaly_scores = comp_bank.score(features, seg_masks)
                         active_scores.append(comp_anomaly_scores[1])
 
-                    if 'patch' in active_banks:
-                        flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
-                        patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
-                        current_patch_map = patch_anomaly_scores[2]
-                        active_scores.append(patch_anomaly_scores[1])
-                    else:
-                        current_patch_map = torch.zeros((512,512), device=device)
+                    # if 'patch' in active_banks:
+                    #     flat_embeddings = features.permute(0, 2, 3, 1).reshape(-1, C)
+                    #     patch_anomaly_scores = patch_bank.score(flat_embeddings, (H, W))
+                    #     current_patch_map = patch_anomaly_scores[2]
+                    #     active_scores.append(patch_anomaly_scores[1])
+
+                    if 'semantic' in active_banks:
+                        semantic_anomaly_scores = semantic_bank.score(imgs)
+                        active_scores.append(semantic_anomaly_scores[1])
+
+                    current_patch_map = torch.zeros((512,512), device=device)
 
 
                     combined_score = sum(active_scores) / len(active_scores)
