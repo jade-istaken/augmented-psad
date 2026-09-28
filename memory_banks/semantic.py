@@ -114,7 +114,7 @@ class SemanticMemoryBank(nn.Module):
 
         context = self.learnable_context.unsqueeze(0).to(device)
         prefix = self.prefix_embeddings.unsqueeze(0).to(device)
-        suffix = self.suffix_embedding.unsqueeze(0).to(device)
+        suffix = self.suffix_embeddings.unsqueeze(0).to(device)
 
         prompts =torch.cat([prefix, context, suffix], dim=1)
 
