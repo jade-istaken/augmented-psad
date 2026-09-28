@@ -40,7 +40,9 @@ class SemanticMemoryBank(nn.Module):
         self.context_length = context_length
         self.context_dimension = self.model.ln_final.weight.shape[0] # thii is the CLIP text embedding dimension
         self.learnable_context = nn.Parameter(torch.empty(self.context_length, self.context_dimension))
-        nn.init.normal(self.learnable_context, std=0.02)
+        nn.init.normal_(self.learnable_context, std=0.02)
+
+        self._prepare_class_tokens()
 
 
 
