@@ -15,7 +15,7 @@ class Segmenter(nn.Module):
         self.num_classes = num_classes
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = CLIPDensePredT(version='ViT-B/16', extract_layers=True)
+        self.model = CLIPDensePredT(version='ViT-B/16', reduce_dim=64) #must explicitly set reduce_dim to 64 to line up with weights
         if pretrained:
             #have to get the pretrained weights but they're not actually part of the repo
             weight_dir = Path("clipseg_weights/")
@@ -29,15 +29,15 @@ class Segmenter(nn.Module):
 
             self.model.load_state_dict(torch.load(weights, map_location='cpu'), strict=False)
 
-            for param in self.model.parameters():
-                #freeze the backbone and decoder so that things are good for few shot training
-                param.requires_grad = False
+        for param in self.model.parameters():
+            #freeze the backbone and decoder so that things are good for few shot training
+            param.requires_grad = False
 
-            self.multi_class_head = nn.Conv2d(16, num_classes, kernel_size=1) #by default clipseg uses a binary head
-            if self.use_coord:
-                self.coord_proj = nn.Conv2d(2, 16, kernel_size=1, bias=False)
-            else:
-                self.coord_proj = None
+        self.multi_class_head = nn.Conv2d(64, num_classes, kernel_size=1) #by default clipseg uses a binary head
+        if self.use_coord:
+            self.coord_proj = nn.Conv2d(2, 64, kernel_size=1, bias=False)
+        else:
+            self.coord_proj = None
 
 
 
