@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import albumentations as A
+import torchvision.transforms as T
 
 
 class MVTecLOCODataset(Dataset):
@@ -38,6 +39,11 @@ class MVTecLOCODataset(Dataset):
             A.Solarize(p=0.2),
             A.ColorJitter(p=0.2),
         ])
+
+        self.clip_normalize = T.Normalize(
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711]
+        )
 
         self._load_file_lists()
 
@@ -124,7 +130,8 @@ class MVTecLOCODataset(Dataset):
         #     image = np.flip(image, axis=1).copy()
         # if vflip_probability<= 0.5:
         #     image = np.flip(image, axis=0).copy()
-        image_tensor = torch.from_numpy(np.array(image)).permute(2,0,1).float()
+        image_tensor = torch.from_numpy(np.array(image)).permute(2,0,1).float() / 255.0
+        image_tensor = self.clip_normalize(image_tensor)
         _, H, W = image_tensor.shape
 
         #load mask if available
