@@ -225,3 +225,4 @@ data/MVTec_LOCO_AD_512size
 data/MVTec_LOCO_AD_512size.zip
 data/mvtec_loco_anomaly_detection.tar.xz
 scripts/outputs
+/clipseg-weights/
