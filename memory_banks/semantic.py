@@ -20,27 +20,24 @@ class SemanticMemoryBank(nn.Module):
             #freeze the model because it's only being used for inference
             param.requires_grad = False
         self.category = category
-        self.register_buffer("memory_bank", torch.tensor([]))
-        text_prompts = [
-            f"a photo of a normal {category}",
-            f"a photo of an anomalous {category}"
-        ]
-        text_inputs = clip.tokenize(text_prompts)
-        self.register_buffer("text_tokens", text_inputs)
 
         with torch.no_grad():
-            text_features = self.model.encode_text(text_inputs)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        self.register_buffer("normal_text_embeddings", text_features[0].unsqueeze(0))
-        self.register_buffer("normal_image_embeddings", torch.empty(0, text_features.shape[1]))
-        self.register_buffer("max_train_distance", torch.tensor(0.0))
-        self.register_buffer("clip_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1))
-        self.register_buffer("clip_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1))
+            #static anomalous prompt used for comparison
+            anomalous_text = clip.tokenize([f"a photo of an anomalous {category}"])
+            anomalous_features = self.model.encode_text(anomalous_text)
+            anomalous_features = anomalous_features / anomalous_features.norm(dim=-1, keepdim=True)
+        self.register_buffer("anomalous_text_embeddings", anomalous_features)
 
         self.context_length = context_length
         self.context_dimension = self.model.ln_final.weight.shape[0] # thii is the CLIP text embedding dimension
         self.learnable_context = nn.Parameter(torch.empty(self.context_length, self.context_dimension))
         nn.init.normal_(self.learnable_context, std=0.02)
+
+        self.register_buffer("memory_bank", torch.tensor([]))
+        self.register_buffer("normal_image_embeddings", torch.empty(0, self.context_dimension))
+        self.register_buffer("max_train_distance", torch.tensor(0.0))
+        self.register_buffer("clip_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1))
+        self.register_buffer("clip_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1))
 
         self._prepare_class_tokens()
 
@@ -57,7 +54,8 @@ class SemanticMemoryBank(nn.Module):
         self.normal_image_embeddings = image_features
 
         with torch.no_grad():
-            text_similarity = (100.0 * self.normal_image_embeddings @ self.normal_text_embeddings.T)
+            learned_text_features = self._get_both_text_features()
+            text_similarity = (100.0 * self.normal_image_embeddings @ learned_text_features.T)
             text_probs = text_similarity.softmax(dim=-1)
             raw_scores = 1.0 - text_probs[:, 0]
 
@@ -66,16 +64,16 @@ class SemanticMemoryBank(nn.Module):
 
 
 
-    def score(self, test_image: torch.Tensor):
+    def score(self, test_image: torch.Tensor) -> Tuple[float,float]:
         with torch.no_grad():
             test_image = self._preprocess_images(test_image)
             test_image = test_image.to(next(self.model.parameters()).device)
             test_features = self.model.encode_image(test_image)
             test_features = test_features / test_features.norm(dim=-1, keepdim=True)
 
-        text_features = self._get_text_features()
-        text_similarity = (100.0 * test_features @ self.normal_text_embeddings.T)
-        text_probs = text_similarity.softmax(dim=-1)
+            text_features = self._get_both_text_features()
+            text_similarity = (100.0 * test_features @ text_features.T)
+            text_probs = text_similarity.softmax(dim=-1)
 
         raw_score = 1.0 - text_probs[:, 0]
         normalized_score = raw_score / self.max_train_distance.item()
@@ -83,7 +81,7 @@ class SemanticMemoryBank(nn.Module):
 
 
 
-        return raw_score, normalized_score
+        return raw_score.mean().item(), normalized_score.mean().item()
 
     def _preprocess_images(self, images: torch.Tensor) -> torch.Tensor:
         images = functional.interpolate(images, size=(224, 224), mode='bicubic', align_corners=False)
@@ -108,7 +106,7 @@ class SemanticMemoryBank(nn.Module):
         self.register_buffer("prefix_embeddings", prefix_emb)
         self.register_buffer("suffix_embeddings", suffix_emb)
 
-    def _get_text_features(self) -> torch.Tensor:
+    def _get_normal_text_features(self) -> torch.Tensor:
         #injects learnable context directly into the transformer sequence
         device = next(self.model.parameters()).device
 
@@ -124,7 +122,7 @@ class SemanticMemoryBank(nn.Module):
             padding = torch.zeros(1, 77 - seq_length, prompts.shape[2], device=device)
             prompts = torch.cat([prompts, padding], dim=1)
 
-        prompts = self.model.positional_embedding.unsqueeze(0).to(device)
+        prompts = prompts + self.model.positional_embedding.unsqueeze(0).to(device)
         prompts = prompts.permute(1,0,2)
 
         x = self.model.transformer(prompts)
@@ -135,6 +133,12 @@ class SemanticMemoryBank(nn.Module):
         x = x[torch.arange(x.shape[0]), eos_pos] @ self.model.text_projection.to(device)
 
         return x / x.norm(dim=-1, keepdim=True)
+
+    def _get_both_text_features(self) -> torch.Tensor:
+        #returns stacked text features [2,D] for normal and anomalous prompts
+        normal_features = self._get_normal_text_features()
+        anomalous_features = self.anomalous_text_embeddings.to(normal_features.device)
+        return torch.cat([normal_features, anomalous_features], dim=0)
 
     def train_prompts(self, images: torch.Tensor, epochs: int = 50, lr: float = 0.001):
         images = self._preprocess_images(images)
@@ -154,12 +158,13 @@ class SemanticMemoryBank(nn.Module):
         self.train()
 
         for epoch in range(epochs):
+            print(f"Epoch {epoch} of {epochs}")
             #training loop to refine the learnable prompts
             optimizer.zero_grad()
 
-            text_features = self._get_text_features() #get current state of learnable prompt
-            text_features = text_features.expand(images.shape[0], -1)
-            logits = (100.0 * image_features @ text_features.T)
+            text_features = self._get_both_text_features() #get current state of learnable prompt and anomalous prompt [2,D]
+            # text_features = text_features.expand(images.shape[0], -1)
+            logits = (100.0 * image_features @ text_features.T) #[B,2]
 
             loss = criterion(logits, target)
             loss.backward()
