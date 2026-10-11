@@ -1,61 +1,67 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as functional
-from torch.nn.functional import bilinear
-from torchvision.models import Wide_ResNet101_2_Weights, wide_resnet101_2
-from models import init_backbone
-import clip
+import torch.nn.functional as F
+from clipseg.clipseg import CLIPDensePredT
+from pathlib import Path
+import urllib.request
+import zipfile
 
 class Segmenter(nn.Module):
-    # use a wideresnet101 backbone and inject coordinate features at the bottleneck
+    # based on clipseg https://github.com/timojl/clipseg/tree/master with a minor modification for coordinate injection and multi-class classification
 
     def __init__(self, num_classes, use_coord = True, pretrained = True):
         super().__init__()
         self.use_coord = use_coord
+        self.num_classes = num_classes
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        clip_model, _ = clip.load("RN101", device=device)
-        self.encoder = clip_model.visual
-        self.encoder = self.encoder.float()
+        self.model = CLIPDensePredT(version='ViT-B/16', extract_layers=True)
+        if pretrained:
+            #have to get the pretrained weights but they're not actually part of the repo
+            weight_dir = Path("clipseg_weights/")
+            if not weight_dir.exists():
+                weight_dir.mkdir()
+            weights = weight_dir / 'rd64-uni-refined.pth'
+            if not weights.exists():
+                urllib.request.urlretrieve('https://owncloud.gwdg.de/index.php/s/ioHbRzFx6th32hn/download', weight_dir / 'weights.zip')
+                with zipfile.ZipFile(weight_dir / 'weights.zip') as zip_ref:
+                    zip_ref.extractall()
 
-        for param in self.encoder.parameters():
-            param.requires_grad = False
+            self.model.load_state_dict(torch.load(weights, map_location='cpu'), strict=False)
 
-        bottleneck_in_ch = 1024 + (2 if use_coord else 0) #add 2 extra channels for coordinates if necessary
+            for param in self.model.parameters():
+                #freeze the backbone and decoder so that things are good for few shot training
+                param.requires_grad = False
 
-        # lightweight decoder at the end
-        self.conv1 = nn.Conv2d(bottleneck_in_ch, 512, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(512, 256, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(256, num_classes, kernel_size=1)
-        self.relu = nn.ReLU()
+            self.multi_class_head = nn.Conv2d(16, num_classes, kernel_size=1) #by default clipseg uses a binary head
+            if self.use_coord:
+                self.coord_proj = nn.Conv2d(2, 16, kernel_size=1, bias=False)
+            else:
+                self.coord_proj = None
+
+
 
     def forward(self, in_tensor: torch.Tensor, coord: torch.Tensor = None):
-        x = in_tensor.float()
+        #clipseg, being clip-based, expects some prompts, but we can just give a list of generic prompts
+        #and let the visual decoder head do the actual classification
+        prompts = ['object'] * in_tensor.shape[0]
 
-        out = self.encoder.relu1(self.encoder.bn1(self.encoder.conv1(x)))
-        out = self.encoder.relu2(self.encoder.bn2(self.encoder.conv2(out)))
-        out = self.encoder.relu3(self.encoder.bn3(self.encoder.conv3(out)))
-        out = self.encoder.avgpool(out)
+        with torch.no_grad():
+            _, features = self.model(in_tensor, prompts) # we discard the logits, only need the features
 
-        features_0 = self.encoder.layer1(out) # skip connection 1 (high res)
-        features_1 = self.encoder.layer2(features_0) #skip connection 2 (mid res)
-        out = self.encoder.layer3(features_1) #bottleneck
+        decoder_features = features[-1] # features has shape [B,16,H,W]
 
-        #coordinate integration
         if self.use_coord and coord is not None:
-            coord_interpolation = functional.interpolate(
-                coord, size=out.shape[-2:], mode="bilinear", align_corners=True
-            )
-            out = torch.cat([out,coord_interpolation], dim=1)
+            target_size = decoder_features.shape[-2:] #get coord dimensions
+            coord_resized = F.interpolate(coord, size=target_size, mode='bilinear', align_corners=False)
+            coord_proj = self.coord_proj(coord_resized)
+            decoder_features = decoder_features + coord_proj #concatenat the coordinate tensor to the features
 
-        #lightweight decoder
-        out = functional.interpolate(out, size=features_1.shape[-2:], mode="bilinear", align_corners=True)
-        out = self.relu(self.conv1(out)) + features_1
+        out = self.multi_class_head(decoder_features)
 
-        out = functional.interpolate(out, size=features_0.shape[-2:], mode="bilinear",align_corners=True)
-        out = self.relu(self.conv2(out)) + features_0
+        if out.shape[-1] != 512:
+            #resize as necessary
+            out = F.interpolate(out, size=(512,512), mode='bilinear')
 
-        out = functional.interpolate(out, size=in_tensor.shape[-2:], mode="bilinear", align_corners=True)
-        out = self.conv3(out)
 
         return out
