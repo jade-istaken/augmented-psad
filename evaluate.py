@@ -60,8 +60,9 @@ def evaluate(args):
     feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=["layer2", "layer3"]).to(device)
     feature_extractor.eval()
 
-    seg_model = Segmenter(num_classes=args.num_classes, use_coord=True, pretrained=False).to(device)
-    seg_model.load_state_dict(torch.load(Path(args.seg_checkpoint)))
+    seg_model = Segmenter(num_classes=args.num_classes)
+    support_set_path = Path(args.seg_checkpoint) / args.category / "support_set.pt"
+    seg_model.load_support_set(support_set_path, device)
     seg_model.eval()
 
     # initialize and load saved memory banks

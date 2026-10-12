@@ -22,11 +22,10 @@ def build_banks(args):
     )
     train_loader = data_manager.get_train_loader()
 
-    #initialize models
-    #trained segmentation model from phase 2 (refine_unet.py)
-    seg_model_path = Path(args.seg_checkpoint)
-    seg_model = Segmenter(num_classes=args.num_classes, use_coord=True, pretrained=False).to(device)
-    seg_model.load_state_dict(torch.load(Path(args.seg_checkpoint)))
+    #initialize model
+    seg_model = Segmenter(num_classes=args.num_classes).to(device)
+    support_set_path = Path(args.save_dir) / args.category / "support_set.pt"
+    seg_model.load_support_set(support_set_path, device)
     seg_model.eval()
 
     #frozen feature extractor backbone for memory banks
@@ -61,7 +60,7 @@ def build_banks(args):
             imgs = batch['image'].to(device)
             coords = batch['coord'].to(device)
 
-            seg_logits = seg_model(imgs, coords)
+            seg_logits = seg_model(imgs)
             seg_masks = torch.argmax(seg_logits, dim=1)  # [B,H,W]
 
             features = feature_extractor(imgs)  # [B,C,H,W]
