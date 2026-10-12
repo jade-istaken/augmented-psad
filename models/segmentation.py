@@ -74,10 +74,10 @@ class Segmenter(nn.Module):
 
         logits = torch.zeros(B, self.num_classes, H, W, device = self.device) #initialize the logits tensor to all zeros
 
-        query_imgs = (in_tensor.float() / 255.0).cpu().numpy()
         CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1).to(self.device) #needed for denormalization
         CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1).to(self.device)
-        in_tensor = (in_tensor.float() * CLIP_STD + CLIP_MEAN).clamp(0, 1)
+        denorm_imgs = (in_tensor.float() * CLIP_STD + CLIP_MEAN).clamp(0, 1)
+        query_imgs = denorm_imgs.cpu().numpy()
 
         if self.support_set is None:
             raise RuntimeError("no support_set yet, please set_support_set() first")
@@ -89,26 +89,34 @@ class Segmenter(nn.Module):
             support_data = self.support_set[cls_id]
             support_imgs = support_data['images'] # [K,3,H,W]
             support_masks = support_data['masks'] # [K,H,W]
+            K = support_imgs.shape[0]
 
             batch_preds = []
             for batch in range(B):
                 query_image = query_imgs[batch].transpose(1,2,0) #convert CHWY to HWC
-                prompt_imgs = [img.cpu().numpy().transpose(1, 2, 0) for img in support_imgs]
-                prompt_masks = [mask.cpu().numpy() for mask in support_masks]
+                pred_accumulator = torch.zeros((1, 1, H, W), device=self.device, dtype=torch.float32)
 
-                inputs = self.processor(
-                    images = query_image,
-                    prompt_images =prompt_imgs,
-                    prompt_masks = prompt_masks,
-                    return_tensors = 'pt'
-                ).to(self.device)
+                for k in range(K):
+                    prompt_imgs = support_imgs[k].cpu().numpy().transpose(1, 2, 0)
+                    prompt_masks = support_masks[k].cpu().numpy()
 
-                with torch.no_grad():
-                    outputs = self.model(**inputs)
+                    inputs = self.processor(
+                        images = query_image,
+                        prompt_images =prompt_imgs,
+                        prompt_masks = prompt_masks,
+                        return_tensors = 'pt'
+                    ).to(self.device)
 
-                pred_mask = outputs.pred_masks
-                pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
-                batch_preds.append(pred_mask)
+                    with torch.no_grad():
+                        outputs = self.model(**inputs)
+
+                    pred_mask = outputs.pred_masks
+                    if pred_mask.shape[1] == 3:
+                        pred_mask = pred_mask[:, 0:1, :, :]
+                    pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
+                    pred_accumulator += pred_mask
+                avg_pred = pred_accumulator / K
+                batch_preds.append(avg_pred)
 
             cls_preds = torch.cat(batch_preds, dim=0)
             #scale predictions so they're. kind of like logits ?

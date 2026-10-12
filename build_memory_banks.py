@@ -24,7 +24,7 @@ def build_banks(args):
 
     #initialize model
     seg_model = Segmenter(num_classes=args.num_classes).to(device)
-    support_set_path = Path(args.save_dir) / args.category / "support_set.pt"
+    support_set_path = Path(args.seg_checkpoint) / args.category / "support_set.pt"
     seg_model.load_support_set(support_set_path, device)
     seg_model.eval()
 
