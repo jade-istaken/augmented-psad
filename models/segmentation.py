@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,6 +36,36 @@ class Segmenter(nn.Module):
             images = data['images'].cpu()
             masks = (data['masks'] == cls_id).float().cpu()
             #move them to the cpu for numpy work
+
+    def save_support_set(self, save_path: str):
+        #save the support set to a .pt
+        if self.support_set is None:
+            raise RuntimeError("no support set to save")
+
+        cpu_support_set = {}
+        for cls_id, data in self.support_set.items():
+            cpu_support_set[cls_id] = {
+                'images': data['images'].cpu(),
+                'masks': data['masks'].cpu()
+            }
+        torch.save(cpu_support_set, save_path)
+        print(f"Support set saved to {save_path}")
+
+    def load_support_set(self, load_path: str, device: torch.device):
+        #load support set from .pt
+        if not Path(load_path).exists():
+            raise FileNotFoundError(f"Support set not found at {load_path}")
+
+        cpu_support_set = torch.load(load_path, map_location='cpu')
+
+        # move to target device
+        self.support_set = {}
+        for cls_id, data in cpu_support_set.items():
+            self.support_set[cls_id] = {
+                'images': data['images'].to(device),
+                'masks': data['masks'].to(device)
+            }
+        print(f"Support set loaded from {load_path}")
 
     def forward(self, in_tensor: torch.Tensor):
         #in_tensor should be [B,3,512,512]
