@@ -1,61 +1,85 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as functional
-from torch.nn.functional import bilinear
-from torchvision.models import Wide_ResNet101_2_Weights, wide_resnet101_2
-from models import init_backbone
-import clip
+import torch.nn.functional as F
+import numpy as np
+from transformers import SegGptForImageSegmentation, SegGptImageProcessor
 
 class Segmenter(nn.Module):
-    # use a wideresnet101 backbone and inject coordinate features at the bottleneck
-
-    def __init__(self, num_classes, use_coord = True, pretrained = True):
+    #this whole thing's SegGPT based now this is going to work WAY better no more weird multi phase training and bespoke models we're cashing in on proven solutions
+    def __init__(self, num_classes):
         super().__init__()
-        self.use_coord = use_coord
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_classes = num_classes
+        self.device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 
-        clip_model, _ = clip.load("RN101", device=device)
-        self.encoder = clip_model.visual
-        self.encoder = self.encoder.float()
+        model_id = "BAAI/seggpt-vit-large"
+        self.processor = SegGptImageProcessor.from_pretrained(model_id)
+        self.model = SegGptForImageSegmentation.from_pretrained(model_id).to(self.device)
 
-        for param in self.encoder.parameters():
+        self.model.eval()
+        for param in self.model.parameters():
+            #this is needed to keep the model frozen, it's an in-context learning model
             param.requires_grad = False
 
-        bottleneck_in_ch = 1024 + (2 if use_coord else 0) #add 2 extra channels for coordinates if necessary
+        self.support_set = None
 
-        # lightweight decoder at the end
-        self.conv1 = nn.Conv2d(bottleneck_in_ch, 512, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(512, 256, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(256, num_classes, kernel_size=1)
-        self.relu = nn.ReLU()
+    def set_support_set(self, support_set: dict):
+        #inject the few-shot support set from the few shot data to the model
+        #dict should be like {class_id: int : {'images': [K, 3, H, W], 'masks': [K, H, W]}}
 
-    def forward(self, in_tensor: torch.Tensor, coord: torch.Tensor = None):
-        x = in_tensor.float()
+        self.support_set = {}
+        for cls_id, data in support_set.items():
+            if cls_id == 0:
+                continue #skips it when the class is background cause like. background doesn't get a mask
 
-        out = self.encoder.relu1(self.encoder.bn1(self.encoder.conv1(x)))
-        out = self.encoder.relu2(self.encoder.bn2(self.encoder.conv2(out)))
-        out = self.encoder.relu3(self.encoder.bn3(self.encoder.conv3(out)))
-        out = self.encoder.avgpool(out)
+            images = data['images'].cpu()
+            masks = (data['masks'] == cls_id).float().cpu()
+            #move them to the cpu for numpy work
 
-        features_0 = self.encoder.layer1(out) # skip connection 1 (high res)
-        features_1 = self.encoder.layer2(features_0) #skip connection 2 (mid res)
-        out = self.encoder.layer3(features_1) #bottleneck
+    def forward(self, in_tensor: torch.Tensor):
+        #in_tensor should be [B,3,512,512]
+        B,_,H,W = in_tensor.shape
+        assert H == 512 and W == 512 #just make it so that like. it haaaaas to be 512x512
 
-        #coordinate integration
-        if self.use_coord and coord is not None:
-            coord_interpolation = functional.interpolate(
-                coord, size=out.shape[-2:], mode="bilinear", align_corners=True
-            )
-            out = torch.cat([out,coord_interpolation], dim=1)
+        logits = torch.zeros(B, self.num_classes, H, W, device = self.device) #initialize the logits tensor to all zeros
 
-        #lightweight decoder
-        out = functional.interpolate(out, size=features_1.shape[-2:], mode="bilinear", align_corners=True)
-        out = self.relu(self.conv1(out)) + features_1
+        query_imgs = (in_tensor.float() / 255.0).cpu().numpy()
+        CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1).to(self.device) #needed for denormalization
+        CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1).to(self.device)
+        in_tensor = (in_tensor.float() * CLIP_STD + CLIP_MEAN).clamp(0, 1)
 
-        out = functional.interpolate(out, size=features_0.shape[-2:], mode="bilinear",align_corners=True)
-        out = self.relu(self.conv2(out)) + features_0
+        if self.support_set is None:
+            raise RuntimeError("no support_set yet, please set_support_set() first")
 
-        out = functional.interpolate(out, size=in_tensor.shape[-2:], mode="bilinear", align_corners=True)
-        out = self.conv3(out)
+        for cls_id in range (1, self.num_classes):
+            if cls_id not in self.support_set:
+                continue
 
-        return out
+            support_data = self.support_set[cls_id]
+            support_imgs = support_data['images'] # [K,3,H,W]
+            support_masks = support_data['masks'] # [K,H,W]
+
+            batch_preds = []
+            for batch in range(B):
+                query_image = query_imgs[batch].transpose(1,2,0) #convert CHWY to HWC
+                prompt_imgs = [img.cpu().numpy().transpose(1, 2, 0) for img in support_imgs]
+                prompt_masks = [mask.cpu().numpy() for mask in support_masks]
+
+                inputs = self.processor(
+                    images = query_image,
+                    prompt_images =prompt_imgs,
+                    prompt_masks = prompt_masks,
+                    return_tensors = 'pt'
+                ).to(self.device)
+
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+
+                pred_mask = outputs.pred_masks
+                pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
+                batch_preds.append(pred_mask)
+
+            cls_preds = torch.cat(batch_preds, dim=0)
+            #scale predictions so they're. kind of like logits ?
+            logits[:, cls_id:cls_id + 1] = cls_preds * 10.0
+
+        return logits
