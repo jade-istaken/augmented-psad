@@ -184,7 +184,7 @@ def evaluate(args):
                     coords = batch['coord'].to(device)
                     labels = batch['label'].to(device)
 
-                    seg_logits = seg_model(imgs, coords)
+                    seg_logits = seg_model(imgs)
                     seg_masks = torch.argmax(seg_logits, dim=1)
                     features = feature_extractor(imgs)
                     B, C, H, W = features.shape
