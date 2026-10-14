@@ -36,8 +36,6 @@ class SemanticMemoryBank(nn.Module):
         self.register_buffer("memory_bank", torch.tensor([]))
         self.register_buffer("normal_image_embeddings", torch.empty(0, self.context_dimension))
         self.register_buffer("max_train_distance", torch.tensor(0.0))
-        self.register_buffer("clip_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1))
-        self.register_buffer("clip_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1))
 
         self._prepare_class_tokens()
 
@@ -85,9 +83,6 @@ class SemanticMemoryBank(nn.Module):
 
     def _preprocess_images(self, images: torch.Tensor) -> torch.Tensor:
         images = functional.interpolate(images, size=(224, 224), mode='bicubic', align_corners=False)
-        images = images / 255.0
-        images = (images - self.clip_mean) / self.clip_std
-
         return images
 
     def _prepare_class_tokens(self):
