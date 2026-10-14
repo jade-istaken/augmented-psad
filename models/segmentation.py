@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from transformers import SegGptForImageSegmentation, SegGptImageProcessor
+from PIL import Image
+
 
 class Segmenter(nn.Module):
     #this whole thing's SegGPT based now this is going to work WAY better no more weird multi phase training and bespoke models we're cashing in on proven solutions
@@ -34,8 +36,12 @@ class Segmenter(nn.Module):
                 continue #skips it when the class is background cause like. background doesn't get a mask
 
             images = data['images'].cpu()
-            masks = (data['masks'] == cls_id).float().cpu()
+            masks = (data['masks']).float().cpu()
             #move them to the cpu for numpy work
+            self.support_set[cls_id] = {
+                'images': images,
+                'masks': masks
+            }
 
     def save_support_set(self, save_path: str):
         #save the support set to a .pt
@@ -73,6 +79,7 @@ class Segmenter(nn.Module):
         assert H == 512 and W == 512 #just make it so that like. it haaaaas to be 512x512
 
         logits = torch.zeros(B, self.num_classes, H, W, device = self.device) #initialize the logits tensor to all zeros
+        logits[:, 0, :, :] = 1.1
 
         CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1).to(self.device) #needed for denormalization
         CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1).to(self.device)
@@ -93,12 +100,14 @@ class Segmenter(nn.Module):
 
             batch_preds = []
             for batch in range(B):
-                query_image = query_imgs[batch].transpose(1,2,0) #convert CHWY to HWC
+                query_image = Image.fromarray((query_imgs[batch].transpose(1, 2, 0) * 255).astype(np.uint8))
+
                 pred_accumulator = torch.zeros((1, 1, H, W), device=self.device, dtype=torch.float32)
 
                 for k in range(K):
-                    prompt_imgs = support_imgs[k].cpu().numpy().transpose(1, 2, 0)
-                    prompt_masks = support_masks[k].cpu().numpy()
+                    prompt_imgs = Image.fromarray(
+                        (support_imgs[k].cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                    prompt_masks = Image.fromarray((support_masks[k].cpu().numpy() * 255).astype(np.uint8))
 
                     inputs = self.processor(
                         images = query_image,
@@ -113,6 +122,12 @@ class Segmenter(nn.Module):
                     pred_mask = outputs.pred_masks
                     if pred_mask.shape[1] == 3:
                         pred_mask = pred_mask[:, 0:1, :, :]
+
+                    pred_mask = torch.sigmoid(pred_mask)    #GUESS WHO FOROGT AN ACTIVATION FUNCTION
+
+                    query_h = pred_mask.shape[2] // 2 #apparently segGPT will like, stack the query mask and prompt mask by default, this fixes that
+                    pred_mask = pred_mask[:, :, query_h:, :]
+
                     pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
                     pred_accumulator += pred_mask
                 avg_pred = pred_accumulator / K
