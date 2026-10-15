@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 from transformers import SegGptForImageSegmentation, SegGptImageProcessor
 from PIL import Image
+from transformers.models.glm5_next.modeling_glm5_next import chunk_kimi_delta_attention
 
 
 class Segmenter(nn.Module):
@@ -84,7 +85,10 @@ class Segmenter(nn.Module):
         CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1).to(self.device) #needed for denormalization
         CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1).to(self.device)
         denorm_imgs = (in_tensor.float() * CLIP_STD + CLIP_MEAN).clamp(0, 1)
-        query_imgs = denorm_imgs.cpu().numpy()
+        query_imgs = [
+            Image.fromarray((img.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+            for img in denorm_imgs
+        ] #batch process all at once
 
         if self.support_set is None:
             raise RuntimeError("no support_set yet, please set_support_set() first")
@@ -98,42 +102,52 @@ class Segmenter(nn.Module):
             support_masks = support_data['masks'] # [K,H,W]
             K = support_imgs.shape[0]
 
-            batch_preds = []
-            for batch in range(B):
-                query_image = Image.fromarray((query_imgs[batch].transpose(1, 2, 0) * 255).astype(np.uint8))
+            #convert to PIL images all at once
+            support_imgs_pil = [
+                Image.fromarray((img.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                for img in support_imgs
+            ]
+            support_masks_pil = [
+                Image.fromarray((mask.cpu().numpy() * 255).astype(np.uint8))
+                for mask in support_masks
+            ]
 
-                pred_accumulator = torch.zeros((1, 1, H, W), device=self.device, dtype=torch.float32)
+            batch_query_imgs = [query_imgs[b] for b in range(B) for _ in range(K)]
+            batch_prompt_imgs = [img for _ in range(B) for img in support_imgs_pil]
+            batch_prompt_masks = [mask for _ in range(B) for mask in support_masks_pil]
 
-                for k in range(K):
-                    prompt_imgs = Image.fromarray(
-                        (support_imgs[k].cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
-                    prompt_masks = Image.fromarray((support_masks[k].cpu().numpy() * 255).astype(np.uint8))
+            chunk_size = 16  #chunking to avoid ram overflow
+            total_pairs = B * K
+            all_preds = []
 
-                    inputs = self.processor(
-                        images = query_image,
-                        prompt_images =prompt_imgs,
-                        prompt_masks = prompt_masks,
-                        return_tensors = 'pt'
-                    ).to(self.device)
+            for start_idx in range(0, total_pairs, chunk_size):
+                end_idx = min(start_idx + chunk_size, total_pairs)
 
-                    with torch.no_grad():
-                        outputs = self.model(**inputs)
+                inputs = self.processor(
+                    images=batch_query_imgs[start_idx:end_idx],
+                    prompt_images=batch_prompt_imgs[start_idx:end_idx],
+                    prompt_masks=batch_prompt_masks[start_idx:end_idx],
+                    return_tensors='pt'
+                ).to(self.device)
 
-                    pred_mask = outputs.pred_masks
-                    if pred_mask.shape[1] == 3:
-                        pred_mask = pred_mask[:, 0:1, :, :]
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
 
-                    pred_mask = torch.sigmoid(pred_mask)    #GUESS WHO FOROGT AN ACTIVATION FUNCTION
+                pred_mask = outputs.pred_masks
+                if pred_mask.shape[1] == 3:
+                    pred_mask = pred_mask[:, 0:1, :, :]
 
-                    query_h = pred_mask.shape[2] // 2 #apparently segGPT will like, stack the query mask and prompt mask by default, this fixes that
-                    pred_mask = pred_mask[:, :, query_h:, :]
+                pred_mask = torch.sigmoid(pred_mask)    #GUESS WHO FOROGT AN ACTIVATION FUNCTION
 
-                    pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
-                    pred_accumulator += pred_mask
-                avg_pred = pred_accumulator / K
-                batch_preds.append(avg_pred)
+                query_h = pred_mask.shape[2] // 2 #apparently segGPT will like, stack the query mask and prompt mask by default, this fixes that
+                pred_mask = pred_mask[:, :, query_h:, :]
 
-            cls_preds = torch.cat(batch_preds, dim=0)
+                pred_mask = F.interpolate(pred_mask, size=(512, 512), mode='bilinear', align_corners=False)
+                all_preds.append(pred_mask)
+
+            full_pred_masks = torch.cat(all_preds, dim=0) #concatenate chunks to [B*K,1,512,512]
+            cls_preds = full_pred_masks.view(B,K,1,512,512).mean(dim=1)
+
             #scale predictions so they're. kind of like logits ?
             logits[:, cls_id:cls_id + 1] = cls_preds * 10.0
 
