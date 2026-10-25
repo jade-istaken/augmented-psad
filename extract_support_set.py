@@ -17,16 +17,15 @@ def extract_and_save(args):
 
     model = Segmenter(num_classes=args.num_classes)
 
-    support_set = {c: {'images': [], 'masks': []} for c in range(1, args.num_classes)}
+    support_set = {1: {'images': [], 'masks': []}}
     for batch in few_shot_loader:
         for b in range(batch['image'].shape[0]):
-            unique_classes = torch.unique(batch['mask'][b])
-            for cls_id in unique_classes:
-                cls_id = int(cls_id.item())
-                if 0 < cls_id < args.num_classes:
-                    cls_mask = (batch['mask'][b] == cls_id).float()
-                    support_set[cls_id]['images'].append(batch['image'][b:b + 1])
-                    support_set[cls_id]['masks'].append(cls_mask.unsqueeze(0))
+            mask = batch['mask'][b]
+            if (mask > 0).any():
+                binarized_mask = (mask > 0).float()
+
+                support_set[1]['images'].append(batch['image'][b:b + 1])
+                support_set[1]['masks'].append(binarized_mask.unsqueeze(0))
 
     for cls_id in support_set:
         if len(support_set[cls_id]['images']) > 0:

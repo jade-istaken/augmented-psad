@@ -6,14 +6,13 @@ import torch.nn.functional as F
 import numpy as np
 from transformers import SegGptForImageSegmentation, SegGptImageProcessor
 from PIL import Image
-from transformers.models.glm5_next.modeling_glm5_next import chunk_kimi_delta_attention
 
 
 class Segmenter(nn.Module):
     #this whole thing's SegGPT based now this is going to work WAY better no more weird multi phase training and bespoke models we're cashing in on proven solutions
     def __init__(self, num_classes):
         super().__init__()
-        self.num_classes = num_classes
+        self.num_classes = 2
         self.device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
 
         model_id = "BAAI/seggpt-vit-large"
@@ -32,17 +31,21 @@ class Segmenter(nn.Module):
         #dict should be like {class_id: int : {'images': [K, 3, H, W], 'masks': [K, H, W]}}
 
         self.support_set = {}
+        all_images = []
+        all_masks = []
+
         for cls_id, data in support_set.items():
             if cls_id == 0:
                 continue #skips it when the class is background cause like. background doesn't get a mask
 
             images = data['images'].cpu()
-            masks = (data['masks']).float().cpu()
+            masks = (data['masks'] > 0).float().cpu()
             #move them to the cpu for numpy work
-            self.support_set[cls_id] = {
-                'images': images,
-                'masks': masks
-            }
+            if len(all_images) > 0:
+                self.support_set[1] = {
+                    'images': torch.cat(all_images, dim=0),
+                    'masks': torch.cat(all_masks, dim=0)
+                }
 
     def save_support_set(self, save_path: str):
         #save the support set to a .pt
@@ -93,11 +96,8 @@ class Segmenter(nn.Module):
         if self.support_set is None:
             raise RuntimeError("no support_set yet, please set_support_set() first")
 
-        for cls_id in range (1, self.num_classes):
-            if cls_id not in self.support_set:
-                continue
-
-            support_data = self.support_set[cls_id]
+        if 1 in self.support_set:
+            support_data = self.support_set[1]
             support_imgs = support_data['images'] # [K,3,H,W]
             support_masks = support_data['masks'] # [K,H,W]
             K = support_imgs.shape[0]
@@ -148,7 +148,6 @@ class Segmenter(nn.Module):
             full_pred_masks = torch.cat(all_preds, dim=0) #concatenate chunks to [B*K,1,512,512]
             cls_preds = full_pred_masks.view(B,K,1,512,512).mean(dim=1)
 
-            #scale predictions so they're. kind of like logits ?
-            logits[:, cls_id:cls_id + 1] = cls_preds * 10.0
+            logits[:, 1:2] = torch.logit(cls_preds.clamp(1e-6, 1.0 - 1e-6))
 
         return logits
