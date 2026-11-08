@@ -7,7 +7,7 @@ from models.backbone import init_backbone
 from dataset import MVTecLOCODataLoader
 from detector import GlobalKNNDetector
 
-def build_banks(args):
+def build_bank(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
     data_manager = MVTecLOCODataLoader(
@@ -55,4 +55,4 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
     args = parser.parse_args()
-    build_banks(args)
+    build_bank(args)
