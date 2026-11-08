@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from models.feature_extractor import FeatureExtractor
 from models.backbone import init_backbone
-from data.dataset import MVTecLOCODataLoader
+from dataset import MVTecLOCODataLoader
 from detector import GlobalKNNDetector
 
 def build_banks(args):
