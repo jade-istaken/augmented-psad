@@ -40,6 +40,9 @@ class Segmenter(nn.Module):
 
             images = data['images'].cpu()
             masks = (data['masks'] > 0).float().cpu()
+
+            all_images.append(images)
+            all_masks.append(masks)
             #move them to the cpu for numpy work
             if len(all_images) > 0:
                 self.support_set[1] = {
