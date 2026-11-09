@@ -3,9 +3,12 @@ import csv
 import json
 from argparse import Namespace
 from pathlib import Path
+import gc
+import torch
 
 from build_memory_bank import build_bank
 from evaluate import evaluate
+from models import FeatureExtractor, init_backbone, feature_extractor
 
 CATEGORIES = ["breakfast_box", "juice_bottle", "pushpins", "screw_bag", "splicing_connectors"]
 
@@ -13,6 +16,8 @@ CATEGORIES = ["breakfast_box", "juice_bottle", "pushpins", "screw_bag", "splicin
 def run_all(args):
     save_dir = Path(args.save_dir)
     rows = []
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    extractor = FeatureExtractor(init_backbone(), layers_to_extract=args.layers).to(device).eval()
 
     for category in args.categories:
         print(f"\n===== {category} =====")
@@ -29,6 +34,7 @@ def run_all(args):
                 num_workers=args.num_workers,
                 seed=args.seed,
                 save_dir=args.save_dir,
+                feature_extractor = extractor
             ))
 
         evaluate(Namespace(
@@ -38,10 +44,13 @@ def run_all(args):
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             num_neighbors=args.num_neighbors,
+            feature_extractor = extractor
         ))
 
         res = json.loads((save_dir / category / f"results_k{args.num_neighbors}.json").read_text())
         rows.append({"category": category, "LA_auroc": res["LA_auroc"], "SA_auroc": res["SA_auroc"]})
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # averages over categories (AUROC reported as percentages to match the paper table)
     la = [r["LA_auroc"] for r in rows]

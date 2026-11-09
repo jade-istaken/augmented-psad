@@ -21,7 +21,7 @@ def score_loader(detector, loader, desc) -> np.ndarray:
     scores = [detector.score(b["image"]).cpu() for b in tqdm(loader, desc=desc)]
     return torch.cat(scores).numpy()
 
-def evaluate(args):
+def evaluate(args, feature_extractor=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     bank_save_dir = Path(args.save_dir) / args.category
     cfg = json.loads((bank_save_dir / "config.json").read_text())
@@ -36,8 +36,9 @@ def evaluate(args):
     loaders = data_manager.get_all_test_loaders() # returns a dictionary with keys ['good', 'logical_anomalies', 'structural_anomalies']
 
     # initialize feature extraction model and segmentation model from the saved checkpoints
-    backbone = init_backbone()
-    feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=cfg["layers"]).to(device)
+    if feature_extractor is None:
+        backbone = init_backbone()
+        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=cfg["layers"]).to(device)
     feature_extractor.eval()
 
     # initialize and load saved memory banks

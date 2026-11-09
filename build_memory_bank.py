@@ -7,7 +7,7 @@ from models.backbone import init_backbone
 from dataset import MVTecLOCODataLoader
 from detector import GlobalKNNDetector
 
-def build_bank(args):
+def build_bank(args, feature_extractor=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
     data_manager = MVTecLOCODataLoader(
@@ -19,8 +19,9 @@ def build_bank(args):
     train_loader = data_manager.get_train_loader()
 
     #frozen feature extractor backbone for memory bank
-    backbone = init_backbone()
-    feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers).to(device)
+    if feature_extractor is None:
+        backbone = init_backbone()
+        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers).to(device)
     feature_extractor.eval()
 
     #init the memory bank
