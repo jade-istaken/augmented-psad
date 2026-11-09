@@ -10,13 +10,14 @@ class FeatureExtractor(nn.Module):
         self.backbone = backbone
         self.layers_to_extract = layers_to_extract
         self.hooked_features = {}
+        self._handles = []
         self._register_hooks()
 
     def _register_hooks(self):
         #registers all the forward hooks in the layers_to_extract list
         for name, module in self.backbone.named_modules(remove_duplicate=False):
             if name in self.layers_to_extract:
-                module.register_forward_hook(self._make_hook(name))
+                self._handles.append(module.register_forward_hook(self._make_hook(name)))
 
     def _make_hook(self, layer_name):
         def hook(module, input_args, output):
@@ -47,6 +48,12 @@ class FeatureExtractor(nn.Module):
             aligned_features.append(feature_map)
         return torch.cat(aligned_features, dim=1)
 
+    def close(self):
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+        self.hooked_features = {}
+
     def forward(self, in_tensor: torch.Tensor):
         #pass the in_tensor to the backbone and process the hooked features
         self.hooked_features = {}
@@ -55,6 +62,8 @@ class FeatureExtractor(nn.Module):
             _ = self.backbone(in_tensor) #we just need to do a forward pass for the hooks to work
 
         processed_features = self._align_and_concatenate()
+
+        self.hooked_features = {} # stops memory leaks between batches
 
         #apply L2 normalization across the channel dimension
         normalized_features = functional.normalize(processed_features, p=2, dim=1)
