@@ -17,7 +17,8 @@ def run_all(args):
     save_dir = Path(args.save_dir)
     rows = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    extractor = FeatureExtractor(init_backbone(), layers_to_extract=args.layers).to(device).eval()
+    extractor = FeatureExtractor(init_backbone(args.backbone), layers_to_extract=args.layers).to(device).eval()
+    shot = 'few_shot' if args.few_shot else 'full_shot'
 
     for category in args.categories:
         print(f"\n===== {category} =====")
@@ -34,7 +35,9 @@ def run_all(args):
                 num_workers=args.num_workers,
                 seed=args.seed,
                 save_dir=args.save_dir,
-                feature_extractor = extractor
+                feature_extractor = extractor,
+                few_shot = args.few_shot,
+                backbone = args.backbone
             ))
 
         evaluate(Namespace(
@@ -44,10 +47,11 @@ def run_all(args):
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             num_neighbors=args.num_neighbors,
-            feature_extractor = extractor
+            feature_extractor = extractor,
+            few_shot = args.few_shot
         ))
 
-        res = json.loads((save_dir / category / f"results_k{args.num_neighbors}.json").read_text())
+        res = json.loads((save_dir / category / f"results_k{args.num_neighbors}_{shot}_{args.backbone}.json").read_text())
         rows.append({"category": category, "LA_auroc": res["LA_auroc"], "SA_auroc": res["SA_auroc"]})
         gc.collect()
         torch.cuda.empty_cache()
@@ -60,7 +64,7 @@ def run_all(args):
         r["LA_auroc"] = round(100 * r["LA_auroc"], 2)
         r["SA_auroc"] = round(100 * r["SA_auroc"], 2)
 
-    out = save_dir / f"summary_k{args.num_neighbors}.csv"
+    out = save_dir / f"summary_k{args.num_neighbors}_{shot}_{args.backbone}.csv"
     with open(out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["category", "LA_auroc", "SA_auroc"])
         writer.writeheader()
@@ -83,4 +87,6 @@ if __name__ == "__main__":
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--skip_build", action="store_true", help="Reuse existing banks")
+    p.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
+    p.add_argument("--backbone", default="CLIP")
     run_all(p.parse_args())

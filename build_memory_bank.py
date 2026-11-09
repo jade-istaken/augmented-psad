@@ -16,11 +16,14 @@ def build_bank(args, feature_extractor=None):
         batch_size=args.batch_size,
         num_workers=args.num_workers
     )
-    train_loader = data_manager.get_train_loader()
+    if args.few_shot:
+        train_loader = data_manager.get_few_shot_loader()
+    else:
+        train_loader = data_manager.get_train_loader()
 
     #frozen feature extractor backbone for memory bank
     if feature_extractor is None:
-        backbone = init_backbone()
+        backbone = init_backbone(args.backbone)
         feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers).to(device)
     feature_extractor.eval()
 
@@ -41,6 +44,8 @@ def build_bank(args, feature_extractor=None):
         "num_images": detector.memory_bank.shape[0],
         "seed": args.seed,
         "torch": torch.__version__,
+        "shot": "few_shot" if args.few_shot else "full_shot",
+        "backbone": args.backbone
     }
     (save_dir / "config.json").write_text(json.dumps(config, indent=2))
     print(f"Saved bank {tuple(detector.memory_bank.shape)} to {save_dir}")
@@ -55,5 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
+    parser.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
+    parser.add_argument("--backbone", type=str, default="CLIP")
     args = parser.parse_args()
     build_bank(args)
