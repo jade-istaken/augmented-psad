@@ -3,16 +3,19 @@ import argparse
 import json
 from pathlib import Path
 from models.feature_extractor import FeatureExtractor
-from models.backbone import init_backbone
+from models.backbone import init_backbone, get_norm_stats
 from dataset import MVTecLOCODataLoader
 from detector import GlobalKNNDetector
 
 def build_bank(args, feature_extractor=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
+    mean, std = get_norm_stats(args.backbone)
     data_manager = MVTecLOCODataLoader(
         root_dir=args.root_dir,
         category=args.category,
+        mean=mean,
+        std=std,
         batch_size=args.batch_size,
         num_workers=args.num_workers
     )
@@ -23,7 +26,7 @@ def build_bank(args, feature_extractor=None):
 
     #frozen feature extractor backbone for memory bank
     if feature_extractor is None:
-        backbone = init_backbone(args.backbone)
+        backbone = init_backbone(args.backbone,args.layers)
         feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers).to(device)
     feature_extractor.eval()
 

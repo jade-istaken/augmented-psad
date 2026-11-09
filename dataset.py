@@ -12,10 +12,11 @@ class MVTecLOCODataset(Dataset):
     def __init__(self,
                  root_dir: str,
                  category: str, #possible categories are 'good', 'logical_anomalies', and 'structural_anomalies' but this only matters for testing
+                 mean, std,     #allows for testing different training regiments (imagenet vs clip)
                  split: str = 'train',
                  image_size: Tuple[int,int] = (512,512),
                  few_shot:bool = False,
-                 anomaly_type: str | None = None):
+                 anomaly_type: str | None = None,):
         self.root_dir = Path(root_dir)
         self.category = category
         self.split = split
@@ -26,9 +27,9 @@ class MVTecLOCODataset(Dataset):
         self.images: List[Path] = []
         self.labels: List[int] = [] #0 is normal, 1 is anomalous
 
-        self.clip_normalize = T.Normalize(
-            mean=[0.48145466, 0.4578275, 0.40821073],
-            std=[0.26862954, 0.26130258, 0.27577711]
+        self.normalize = T.Normalize(
+            mean=mean,
+            std=std
         )
 
         self._load_file_lists()
@@ -98,7 +99,7 @@ class MVTecLOCODataset(Dataset):
         # if vflip_probability<= 0.5:
         #     image = np.flip(image, axis=0).copy()
         image_tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).float() / 255.0
-        image_tensor = self.clip_normalize(image_tensor)
+        image_tensor = self.normalize(image_tensor)
         _, H, W = image_tensor.shape
 
 
@@ -127,6 +128,7 @@ class MVTecLOCODataLoader:
             self,
             root_dir: str,
             category:str,
+            mean, std,  # allows for testing different training regiments (imagenet vs clip)
             batch_size: int = 8,
             num_workers: int = 4,
             image_size: Tuple[int,int] = (512,512)
@@ -136,12 +138,16 @@ class MVTecLOCODataLoader:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.image_size = image_size
+        self.mean = mean
+        self.std = std
 
     def get_train_loader(self, few_shot: bool = False) -> DataLoader:
         #normal training data dataloader
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='train',
             image_size = self.image_size,
             few_shot=few_shot
@@ -158,6 +164,8 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='few_shot',
             image_size=self.image_size,
             few_shot=True
@@ -174,6 +182,8 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='validation',
             image_size=self.image_size,
         )
@@ -190,6 +200,8 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='test',
             image_size=self.image_size,
             anomaly_type=anomaly_type

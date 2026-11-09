@@ -10,6 +10,8 @@ from dataset import MVTecLOCODataLoader
 from detector import GlobalKNNDetector
 from models import init_backbone, FeatureExtractor
 from sklearn.metrics import roc_auc_score
+
+from models.backbone import get_norm_stats
 from utils.metrics import compute_metrics
 
 def image_auroc(normal: np.ndarray, anomalous: np.ndarray) -> float:
@@ -25,10 +27,12 @@ def evaluate(args, feature_extractor=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     bank_save_dir = Path(args.save_dir) / args.category
     cfg = json.loads((bank_save_dir / "config.json").read_text())
-
+    mean, std = get_norm_stats(cfg['backbone'])
     data_manager = MVTecLOCODataLoader(
         root_dir=args.root_dir,
         category=args.category,
+        mean=mean,
+        std=std,
         batch_size=args.batch_size,
         num_workers=args.num_workers
     )
@@ -37,7 +41,7 @@ def evaluate(args, feature_extractor=None):
 
     # initialize feature extraction model and segmentation model from the saved checkpoints
     if feature_extractor is None:
-        backbone = init_backbone(cfg["backbone"])
+        backbone = init_backbone(cfg["backbone"],cfg['layers'])
         feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=cfg["layers"]).to(device)
     feature_extractor.eval()
 

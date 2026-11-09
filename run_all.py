@@ -17,8 +17,9 @@ def run_all(args):
     save_dir = Path(args.save_dir)
     rows = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    extractor = FeatureExtractor(init_backbone(args.backbone), layers_to_extract=args.layers).to(device).eval()
+    extractor = FeatureExtractor(init_backbone(args.backbone,args.layers), layers_to_extract=args.layers).to(device).eval()
     shot = 'few_shot' if args.few_shot else 'full_shot'
+    print(f"Using backbone: {args.backbone}")
 
     for category in args.categories:
         print(f"\n===== {category} =====")
@@ -88,5 +89,5 @@ if __name__ == "__main__":
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--skip_build", action="store_true", help="Reuse existing banks")
     p.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
-    p.add_argument("--backbone", default="CLIP")
+    p.add_argument("--backbone", default="clip_rn101")
     run_all(p.parse_args())
