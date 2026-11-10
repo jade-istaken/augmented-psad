@@ -85,7 +85,7 @@ if __name__ == "__main__":
     p.add_argument("--categories", nargs="+", default=CATEGORIES)
     p.add_argument("--layers", nargs="+", default=["layer2", "layer3"])
     p.add_argument("--num_neighbors", type=int, default=1)
-    p.add_argument("--batch_size", type=int, default=16)
+    p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--skip_build", action="store_true", help="Reuse existing banks")
