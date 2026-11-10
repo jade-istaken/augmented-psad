@@ -27,7 +27,7 @@ def build_bank(args, feature_extractor=None):
     #frozen feature extractor backbone for memory bank
     if feature_extractor is None:
         backbone = init_backbone(args.backbone,args.layers)
-        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers).to(device)
+        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=args.layers, norm_mode=args.norm_mode).to(device)
     feature_extractor.eval()
 
     #init the memory bank
@@ -48,7 +48,8 @@ def build_bank(args, feature_extractor=None):
         "seed": args.seed,
         "torch": torch.__version__,
         "shot": "few_shot" if args.few_shot else "full_shot",
-        "backbone": args.backbone
+        "backbone": args.backbone,
+        "norm_mode": args.norm_mode
     }
     (save_dir / "config.json").write_text(json.dumps(config, indent=2))
     print(f"Saved bank {tuple(detector.memory_bank.shape)} to {save_dir}")
@@ -65,5 +66,6 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
     parser.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
     parser.add_argument("--backbone", type=str, default="CLIP")
+    parser.add_argument("--norm_mode", type=str, default="joint")
     args = parser.parse_args()
     build_bank(args)

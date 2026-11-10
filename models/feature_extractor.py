@@ -5,10 +5,12 @@ from typing import List, Dict, Tuple
 
 class FeatureExtractor(nn.Module):
     #wrapper for the backbone to extract and normalize the feature maps
-    def __init__(self, backbone: nn.Module, layers_to_extract: List[str]):
+    def __init__(self, backbone: nn.Module, layers_to_extract: List[str],norm_mode="joint"):
         super().__init__()
+        assert norm_mode in ("joint", "layer_pixel", "layer_pooled")
         self.backbone = backbone
         self.layers_to_extract = layers_to_extract
+        self.norm_mode = norm_mode #for testing how different normalization methods work
         self.hooked_features = {}
         self._handles = []
         self._register_hooks()
@@ -24,29 +26,14 @@ class FeatureExtractor(nn.Module):
             self.hooked_features[layer_name] = output
         return hook
 
-    def _align_and_concatenate(self):
+    def _align_and_concatenate(self, feats):
         #upsample all the hooked feature maps to whatever the highest spatial resolution is
         #and then concatenate them on the channel dimension
-        aligned_features = []
-        target_size = None
-
-        for layer_name in self.layers_to_extract:
-            #determine the largest spatial resolution
-            feature_map = self.hooked_features[layer_name]
-            if target_size is None or feature_map.shape[-2] > target_size[-2]:
-                target_size = feature_map.shape[-2:]
-
-        for layer_name in self.layers_to_extract:
-            feature_map = self.hooked_features[layer_name]
-            if feature_map.shape[-2:] != target_size:
-                feature_map = functional.interpolate(
-                    feature_map,
-                    size=target_size,
-                    mode='bilinear',
-                    align_corners=False
-                )
-            aligned_features.append(feature_map)
-        return torch.cat(aligned_features, dim=1)
+        target = max((f.shape[-2:] for f in feats), key=lambda s: s[0] * s[1])
+        feats = [f if f.shape[-2:] == target else
+                 functional.interpolate(f, size=target, mode="bilinear", align_corners=False)
+                 for f in feats]
+        return torch.cat(feats, dim=1)
 
     def close(self):
         for h in self._handles:
@@ -60,12 +47,15 @@ class FeatureExtractor(nn.Module):
 
         with torch.no_grad():
             _ = self.backbone(in_tensor) #we just need to do a forward pass for the hooks to work
+        feats = [self.hooked_features[n] for n in self.layers_to_extract]
 
-        processed_features = self._align_and_concatenate()
-
-        self.hooked_features = {} # stops memory leaks between batches
-
-        #apply L2 normalization across the channel dimension
-        normalized_features = functional.normalize(processed_features, p=2, dim=1)
-
-        return normalized_features.float()
+        if self.norm_mode == "joint":
+            maps = functional.normalize(self._align_and_concatenate(feats), dim=1)
+            pooled = maps.mean(dim=(2, 3))
+        elif self.norm_mode == "layer_pixel":
+            maps = self._align_and_concatenate([functional.normalize(f, dim=1) for f in feats])
+            pooled = maps.mean(dim=(2, 3))
+        else:  # layer_pooled
+            pooled = torch.cat([functional.normalize(f.mean(dim=(2, 3)), dim=1)
+                                for f in feats], dim=1)
+        return functional.normalize(pooled.float(), dim=1)

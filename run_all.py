@@ -17,7 +17,7 @@ def run_all(args):
     save_dir = Path(args.save_dir)
     rows = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    extractor = FeatureExtractor(init_backbone(args.backbone,args.layers), layers_to_extract=args.layers).to(device).eval()
+    extractor = FeatureExtractor(init_backbone(args.backbone,args.layers), layers_to_extract=args.layers,norm_mode=args.norm_mode).to(device).eval()
     shot = 'few_shot' if args.few_shot else 'full_shot'
     print(f"Using backbone: {args.backbone}")
 
@@ -38,7 +38,8 @@ def run_all(args):
                 save_dir=args.save_dir,
                 feature_extractor = extractor,
                 few_shot = args.few_shot,
-                backbone = args.backbone
+                backbone = args.backbone,
+                norm_mode = args.norm_mode
             ))
 
         evaluate(Namespace(
@@ -52,7 +53,7 @@ def run_all(args):
             few_shot = args.few_shot
         ))
 
-        res = json.loads((save_dir / category / f"results_k{args.num_neighbors}_{shot}_{args.backbone}.json").read_text())
+        res = json.loads((save_dir / category / f"results_k{args.num_neighbors}_{shot}_{args.backbone}_{args.norm_mode}.json").read_text())
         rows.append({"category": category, "LA_auroc": res["LA_auroc"], "SA_auroc": res["SA_auroc"]})
         gc.collect()
         torch.cuda.empty_cache()
@@ -65,7 +66,7 @@ def run_all(args):
         r["LA_auroc"] = round(100 * r["LA_auroc"], 2)
         r["SA_auroc"] = round(100 * r["SA_auroc"], 2)
 
-    out = save_dir / f"summary_k{args.num_neighbors}_{shot}_{args.backbone}.csv"
+    out = save_dir / f"summary_k{args.num_neighbors}_{shot}_{args.backbone}_{args.layers}_{args.norm_mode}.csv"
     with open(out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["category", "LA_auroc", "SA_auroc"])
         writer.writeheader()
@@ -90,4 +91,5 @@ if __name__ == "__main__":
     p.add_argument("--skip_build", action="store_true", help="Reuse existing banks")
     p.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
     p.add_argument("--backbone", default="clip_rn101")
+    p.add_argument("--norm_mode", type=str, default="joint")
     run_all(p.parse_args())

@@ -42,7 +42,7 @@ def evaluate(args, feature_extractor=None):
     # initialize feature extraction model and segmentation model from the saved checkpoints
     if feature_extractor is None:
         backbone = init_backbone(cfg["backbone"],cfg['layers'])
-        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=cfg["layers"]).to(device)
+        feature_extractor = FeatureExtractor(backbone=backbone, layers_to_extract=cfg["layers"], norm_mode=cfg['norm_mode']).to(device)
     feature_extractor.eval()
 
     # initialize and load saved memory banks
@@ -66,7 +66,7 @@ def evaluate(args, feature_extractor=None):
     }
 
     print("Beginning test runs")
-    out = bank_save_dir / f"results_k{args.num_neighbors}_{cfg["shot"]}_{cfg["backbone"]}.json"
+    out = bank_save_dir / f"results_k{args.num_neighbors}_{cfg["shot"]}_{cfg["backbone"]}_{cfg["norm_mode"]}.json"
     out.write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
 

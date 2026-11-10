@@ -28,8 +28,8 @@ class GlobalKNNDetector(nn.Module):
     @torch.no_grad()
     def embed(self, images: torch.Tensor) -> torch.Tensor:
         #images should be shape [B, 3, H, W]. output tensor is [B,C] unit-norm global descriptors
-        features = self.feature_extractor(images.to(self.device))
-        return functional.normalize(features.mean(dim=(2,3)))
+        return self.feature_extractor(images.to(self.device))
+
 
     @torch.no_grad()
     def embed_loader(self, loader):
