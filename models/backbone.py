@@ -6,6 +6,7 @@ from torchvision.models import (
     wide_resnet50_2, Wide_ResNet50_2_Weights,
 )
 import clip
+import clip.model as clip_model
 from dataclasses import dataclass
 from typing import Callable
 
@@ -55,6 +56,35 @@ def _dino_rn50(max_stage):
     m = torch.hub.load("facebookresearch/dino:main", "dino_resnet50")
     return _from_torchvision(m, max_stage)
 
+def _kaiming_init_(module: nn.Module):
+    # same scheme torchvision applies to ResNets built with weights=None
+    for m in module.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.ones_(m.weight)
+            nn.init.zeros_(m.bias)
+
+def _random_clip_builder(seed):
+    def build(max_stage):
+        with torch.random.fork_rng(devices=[]):  # don't disturb the global RNG
+            torch.manual_seed(seed)
+            v = clip_model.ModifiedResNet(layers=(3, 4, 23, 3), output_dim=512,
+                                          heads=32, input_resolution=224, width=64)  # CLIP RN101 config
+            _kaiming_init_(v)
+        stem = nn.Sequential(v.conv1, v.bn1, v.relu1, v.conv2, v.bn2, v.relu2,
+                             v.conv3, v.bn3, v.relu3, v.avgpool)
+        return ResNetTrunk(stem, [v.layer1, v.layer2, v.layer3, v.layer4], max_stage)
+    return build
+
+def _random_tv_builder(seed):
+    def build(max_stage):
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(seed)
+            m = resnet101(weights=None)  # torchvision applies its own Kaiming init
+        return _from_torchvision(m, max_stage)
+    return build
+
 @dataclass(frozen=True)
 class BackboneSpec: #this just lets us save the individual backbone configurations easily ad reuse them later
     build: Callable
@@ -75,6 +105,10 @@ BACKBONES = {
     # Self-supervised control
     "dino_rn50": BackboneSpec(_dino_rn50, *IMAGENET_STATS),
 }
+
+for s in range(3):
+    BACKBONES[f"random_clip_rn101_s{s}"] = BackboneSpec(_random_clip_builder(s), *CLIP_STATS)
+    BACKBONES[f"random_resnet101_s{s}"] = BackboneSpec(_random_tv_builder(s), *IMAGENET_STATS)
 
 ALIASES = {"CLIP": "clip_rn101", "WResNet101": "wrn101_in1k_v2"} #might as well have this because of previous tests
 
