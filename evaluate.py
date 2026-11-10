@@ -12,7 +12,6 @@ from models import init_backbone, FeatureExtractor
 from sklearn.metrics import roc_auc_score
 
 from models.backbone import get_norm_stats
-from utils.metrics import compute_metrics
 
 def image_auroc(normal: np.ndarray, anomalous: np.ndarray) -> float:
     y = np.r_[np.zeros(len(normal)), np.ones(len(anomalous))]
@@ -54,6 +53,11 @@ def evaluate(args, feature_extractor=None):
 
 
     scores = {t: score_loader(detector, l, t) for t, l in loaders.items()}
+    np.savez(
+        bank_save_dir / f"scores_k{args.num_neighbors}.npz",
+        **{f"scores_{t}": s for t, s in scores.items()},
+        **{f"paths_{t}": np.array([str(p) for p in loaders[t].dataset.images]) for t in scores},
+    )
 
     results = {
         "category": args.category,

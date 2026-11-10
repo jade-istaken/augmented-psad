@@ -9,6 +9,7 @@ import torch
 from build_memory_bank import build_bank
 from evaluate import evaluate
 from models import FeatureExtractor, init_backbone, feature_extractor
+from models.backbone import parse_layers
 
 CATEGORIES = ["breakfast_box", "juice_bottle", "pushpins", "screw_bag", "splicing_connectors"]
 
@@ -92,4 +93,6 @@ if __name__ == "__main__":
     p.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
     p.add_argument("--backbone", default="clip_rn101")
     p.add_argument("--norm_mode", type=str, default="layer_pooled")
-    run_all(p.parse_args())
+    args = p.parse_args()
+    args.layers = parse_layers(args.layers)
+    run_all(args)

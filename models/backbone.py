@@ -13,6 +13,11 @@ from typing import Callable
 IMAGENET_STATS = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
 CLIP_STATS = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 
+def parse_layers(values) -> list:
+    if isinstance(values, str):
+        values = [values]
+    return [l for v in values for l in v.replace(",", " ").split()]
+
 class ResNetTrunk(nn.Module):
     #Stem + layer1 through 4, runs only up to deepest stage needed
     def __init__(self, stem: nn.Module, stages: list, max_stage: int):
