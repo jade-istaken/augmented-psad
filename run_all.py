@@ -91,5 +91,5 @@ if __name__ == "__main__":
     p.add_argument("--skip_build", action="store_true", help="Reuse existing banks")
     p.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
     p.add_argument("--backbone", default="clip_rn101")
-    p.add_argument("--norm_mode", type=str, default="joint")
+    p.add_argument("--norm_mode", type=str, default="layer_pooled")
     run_all(p.parse_args())

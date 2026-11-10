@@ -66,6 +66,6 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="./processed_memory_banks")
     parser.add_argument("--few_shot", action="store_true", help="Use few-shot loader")
     parser.add_argument("--backbone", type=str, default="CLIP")
-    parser.add_argument("--norm_mode", type=str, default="joint")
+    parser.add_argument("--norm_mode", type=str, default="layer_pooled")
     args = parser.parse_args()
     build_bank(args)
