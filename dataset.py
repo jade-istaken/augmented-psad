@@ -4,7 +4,6 @@ import torch
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-import albumentations as A
 import torchvision.transforms as T
 
 class MVTecLOCODataset(Dataset):
@@ -13,35 +12,24 @@ class MVTecLOCODataset(Dataset):
     def __init__(self,
                  root_dir: str,
                  category: str, #possible categories are 'good', 'logical_anomalies', and 'structural_anomalies' but this only matters for testing
+                 mean, std,     #allows for testing different training regiments (imagenet vs clip)
                  split: str = 'train',
                  image_size: Tuple[int,int] = (512,512),
-                 load_masks: bool = False,
                  few_shot:bool = False,
-                 anomaly_type: str | None = None):
+                 anomaly_type: str | None = None,):
         self.root_dir = Path(root_dir)
         self.category = category
         self.split = split
         self.image_size = image_size
-        self.load_masks = load_masks
         self.few_shot = few_shot
         self.anomaly_type = anomaly_type
 
         self.images: List[Path] = []
-        self.masks: List[Path] = []
         self.labels: List[int] = [] #0 is normal, 1 is anomalous
 
-        self.aug = A.Compose([
-            A.Posterize(p=0.2),
-            A.Equalize(p=0.2),
-            A.Sharpen(p=0.2),
-            A.RandomBrightnessContrast(p=0.2),
-            A.Solarize(p=0.2),
-            A.ColorJitter(p=0.2),
-        ])
-
-        self.clip_normalize = T.Normalize(
-            mean=[0.48145466, 0.4578275, 0.40821073],
-            std=[0.26862954, 0.26130258, 0.27577711]
+        self.normalize = T.Normalize(
+            mean=mean,
+            std=std
         )
 
         self._load_file_lists()
@@ -50,12 +38,10 @@ class MVTecLOCODataset(Dataset):
         if self.few_shot:
             #only load the few-shot annotations
             images_dir: Path = self.root_dir / 'Images_fewshot_512' / self.category
-            masks_dir = self.root_dir / 'Annotations_fewshot_512' / self.category
 
             if images_dir.exists():
                 img_files = sorted(images_dir.glob('*.png')) #everything with a png file extension in the image path
                 self.images = img_files
-                self.masks = [masks_dir / img.name for img in img_files] #masks and their associated files are named the same
                 self.labels = [0] * len(img_files) # all few-shot images are normal
 
         elif self.split == 'train':
@@ -64,7 +50,6 @@ class MVTecLOCODataset(Dataset):
             if images_dir.exists():
                 img_files = sorted(images_dir.glob('*.png'))
                 self.images = img_files
-                self.masks = [] # no masks in the training data
                 self.labels = [0] * len(img_files) #all the images in the mvtec_loco training set are good
 
         elif self.split == 'validation':
@@ -73,7 +58,6 @@ class MVTecLOCODataset(Dataset):
             if images_dir.exists():
                 img_files = sorted(images_dir.glob('*.png'))
                 self.images = img_files
-                self.masks = [] # no masks in the validation data
                 self.labels = [0] * len(img_files)
 
         elif self.split == 'test':
@@ -81,26 +65,11 @@ class MVTecLOCODataset(Dataset):
                 raise ValueError("anomaly_type must be specified during testing (Possible values are 'good', 'logical_anomalies', and 'structural_anomalies')")
 
             images_dir = self.root_dir / 'orig_512' / self.category / 'test' / self.anomaly_type
-            masks_dir = self.root_dir / 'orig_512' / self.category / 'ground_truth' / self.anomaly_type
 
             if images_dir.exists():
                 img_files = sorted(images_dir.glob('*.png'))
                 self.images = img_files
 
-                #try and load the masks if they're available
-                if self.load_masks and masks_dir.exists():
-                    for img_file in img_files:
-                        mask_subdir = masks_dir / img_file.stem #masks are in subdirectories but have corresponding names to the images
-                        if mask_subdir.exists():
-                            mask_files = sorted(mask_subdir.glob('*.png'))
-                            if mask_files:
-                                self.masks.append(mask_files[0]) #quirk of the way they're stored in the dataset, there's only one mask per folder
-                            else:
-                                self.masks.append(None)
-                        else:
-                            self.masks.append(None)
-                else:
-                    self.masks = [None] * len(img_files)
 
                 #set labels of the images
                 if self.anomaly_type == 'good':
@@ -111,7 +80,7 @@ class MVTecLOCODataset(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         """
         gives a dictionary with the following keys:
             -image: the rgb image tensor [3, H, W]
@@ -121,43 +90,27 @@ class MVTecLOCODataset(Dataset):
         """
         # hflip_probability = np.random.rand()
         # vflip_probability = np.random.rand()
-        image = Image.open(self.images[idx]).convert('RGB')
+        image = Image.open(self.images[index]).convert('RGB')
         image = image.resize(self.image_size, Image.Resampling.BILINEAR) #shouldn't need to resize because they're preprocessed but it's a safety step
         image = np.array(image)
-        if self.split == 'train': image = self.aug(image=image)['image']
+        # if self.split == 'train': image = self.aug(image=image)['image']
         # if hflip_probability <= 0.5: #50% chance of flipping vertically and horizontall (independent)
         #     image = np.flip(image, axis=1).copy()
         # if vflip_probability<= 0.5:
         #     image = np.flip(image, axis=0).copy()
         image_tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).float() / 255.0
-        image_tensor = self.clip_normalize(image_tensor)
+        image_tensor = self.normalize(image_tensor)
         _, H, W = image_tensor.shape
 
-        #load mask if available
-        mask_tensor = None
-        if self.load_masks:
-            if self.masks[idx] is not None and self.masks[idx].exists():
-                mask = Image.open(self.masks[idx])
-                mask = mask.resize(self.image_size, Image.Resampling.NEAREST)
-                mask = np.array(mask)
-                # if hflip_probability <= 0.5:  # 50% chance of flipping vertically and horizontall (independent)
-                #     mask = np.flip(mask, axis=1).copy()
-                # if vflip_probability <= 0.5:
-                #     mask = np.flip(mask, axis=0).copy()
-                mask_tensor = torch.from_numpy(np.array(mask)).long()
-            else:
-                mask_tensor = torch.zeros((H,W))
 
         coord_tensor = self._generate_coordinate_grid()
 
         result = {
             'image': image_tensor,
             'coord': coord_tensor,
-            'label': torch.tensor(self.labels[idx], dtype=torch.long),
+            'label': torch.tensor(self.labels[index], dtype=torch.long),
         }
 
-        if mask_tensor is not None:
-            result['mask'] = mask_tensor
 
         return result
 
@@ -175,6 +128,7 @@ class MVTecLOCODataLoader:
             self,
             root_dir: str,
             category:str,
+            mean, std,  # allows for testing different training regiments (imagenet vs clip)
             batch_size: int = 8,
             num_workers: int = 4,
             image_size: Tuple[int,int] = (512,512)
@@ -184,15 +138,18 @@ class MVTecLOCODataLoader:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.image_size = image_size
+        self.mean = mean
+        self.std = std
 
     def get_train_loader(self, few_shot: bool = False) -> DataLoader:
         #normal training data dataloader
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='train',
             image_size = self.image_size,
-            load_masks = False,
             few_shot=few_shot
         )
         return DataLoader(
@@ -207,9 +164,10 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='few_shot',
             image_size=self.image_size,
-            load_masks=True,
             few_shot=True
         )
         return DataLoader(
@@ -224,9 +182,10 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='validation',
             image_size=self.image_size,
-            load_masks=False
         )
         return DataLoader(
             dataset,
@@ -241,9 +200,10 @@ class MVTecLOCODataLoader:
         dataset = MVTecLOCODataset(
             root_dir=self.root_dir,
             category=self.category,
+            mean=self.mean,
+            std=self.std,
             split='test',
             image_size=self.image_size,
-            load_masks=True,
             anomaly_type=anomaly_type
         )
         return DataLoader(
@@ -288,6 +248,5 @@ if __name__ == '__main__':
     # iterate through a batch
     batch = next(iter(few_shot_loader))
     print(f"Image shape: {batch['image'].shape}")
-    print(f"Mask shape: {batch['mask'].shape if 'mask' in batch else 'N/A'}")
     print(f"Coordinate grid shape: {batch['coord'].shape}")
     print(f"Labels: {batch['label']}")
