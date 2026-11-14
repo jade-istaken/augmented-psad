@@ -1,0 +1,23 @@
+Test images per category (good / logical / structural):
+  breakfast_box           102   83   90
+  juice_bottle             94  142   94
+  pushpins                138   91   81
+  screw_bag               122  137   82
+  splicing_connectors     119  108   85
+
+runs/final/clip_rn101_l123_pooled: AUROC (%) with 95% bootstrap CI, 2000 resamples
+cell                           AUROC   CI low  CI high
+breakfast_box LA               94.68    91.33    97.49
+breakfast_box SA               74.21    67.10    80.61
+juice_bottle LA                90.55    86.71    94.06
+juice_bottle SA                87.98    82.55    92.38
+pushpins LA                    71.18    64.44    77.80
+pushpins SA                    83.32    77.76    88.56
+screw_bag LA                   65.91    59.18    72.44
+screw_bag SA                   78.62    72.21    84.75
+splicing_connectors LA         85.34    79.98    90.24
+splicing_connectors SA         69.55    61.96    76.77
+average LA                     81.53    79.28    83.89
+average SA                     78.74    75.84    81.46
+average overall                80.13    77.95    82.15
+Saved table to runs/final/bootstrap/noise_floor.csv

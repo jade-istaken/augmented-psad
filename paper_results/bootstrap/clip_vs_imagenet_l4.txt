@@ -1,0 +1,26 @@
+Test images per category (good / logical / structural):
+  breakfast_box           102   83   90
+  juice_bottle             94  142   94
+  pushpins                138   91   81
+  screw_bag               122  137   82
+  splicing_connectors     119  108   85
+
+A = runs/final/clip_rn101_l4_pooled
+B = runs/final/resnet101_in1k_v2_l4_pooled
+Difference A - B in AUROC points, 95% paired bootstrap CI (2000 resamples); * = CI excludes 0
+cell                               A       B     A-B   CI low  CI high
+breakfast_box LA               90.17   91.29   -1.12    -5.32     3.25
+breakfast_box SA               70.23   77.36   -7.13   -14.18    -0.09 *
+juice_bottle LA                93.13   94.46   -1.32    -5.05     2.44
+juice_bottle SA                85.65   78.70    6.95    -0.72    15.13
+pushpins LA                    56.80   58.73   -1.93    -9.81     5.45
+pushpins SA                    62.74   75.46  -12.72   -21.65    -4.16 *
+screw_bag LA                   61.16   58.36    2.80    -5.27    11.53
+screw_bag SA                   71.27   69.82    1.45    -7.75    10.23
+splicing_connectors LA         80.28   82.25   -1.97    -7.43     3.57
+splicing_connectors SA         70.16   74.08   -3.92   -11.70     3.95
+average LA                     76.31   77.02   -0.71    -3.44     2.02
+average SA                     72.01   75.09   -3.07    -6.87     0.45
+average overall                74.16   76.05   -1.89    -4.66     0.67
+
+Saved table to runs/final/bootstrap/clip_vs_imagenet_l4.csv
